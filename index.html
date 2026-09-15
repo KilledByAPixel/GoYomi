@@ -31,6 +31,7 @@
       <button id="btnPass" title="Pass (P)">Pass</button>
       <button id="btnUndo" title="Take back your last move (U)">↶ Take back</button>
       <button id="btnHint" title="Show the coach's best moves (H)">💡 Hint</button>
+      <button id="btnThreat" title="What does the opponent want to play here? (O)">👁 Their idea</button>
       <button id="btnAI" title="Let the AI play a move for the side to move">🤖 AI move</button>
       <button id="btnResign">Resign</button>
       <button id="btnNew" class="primary">New game</button>
@@ -59,6 +60,7 @@
       <div id="scoreEst" class="score-est">&nbsp;</div>
       <div id="feedback" class="feedback"></div>
       <ul id="warnings" class="warnings"></ul>
+      <div id="threatBox" class="threat-box" hidden></div>
     </section>
 
     <section class="card">
@@ -69,6 +71,7 @@
         <span><i class="lg-score"></i>Score lead</span>
         <span><i class="lg-dot" style="background:#e07b2c"></i>Mistake</span>
       </div>
+      <div id="review" class="review"></div>
     </section>
 
     <section class="card">
@@ -126,7 +129,7 @@
       </details>
       <details>
         <summary>Keyboard</summary>
-        <p><kbd>←</kbd>/<kbd>→</kbd> step · <kbd>U</kbd> take back · <kbd>H</kbd> hint · <kbd>P</kbd> pass · <kbd>Esc</kbd> clear markers<br>
+        <p><kbd>←</kbd>/<kbd>→</kbd> step · <kbd>U</kbd> take back · <kbd>H</kbd> hint · <kbd>O</kbd> their idea · <kbd>P</kbd> pass · <kbd>Esc</kbd> clear markers<br>
         <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers</p>
       </details>
     </section>

@@ -5,6 +5,7 @@ import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
 import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, GRADES, explainMove, threats, describeScore } from './coach.js';
 import { BoardView } from './view.js';
+import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
 import { stoneSound } from './sound.js';
 
@@ -24,7 +25,7 @@ const TOGGLES = [
 
 const DEFAULTS = {
   human: BLACK,              // BLACK or WHITE vs the AI; 0 = study mode (you play both)
-  level: 1,
+  level: 2,
   komi: 7,
   handicap: 0,
   coach: true,
@@ -44,10 +45,13 @@ let better = null;           // { node, move, pv } — coach move shown on node'
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let coachNode = null;
+let threat = null;           // { node, pending | none | move, pv, explain, cost } — opponent's idea
 
 const opponent = new Engine('opponent');
 // The coach searches the same position on several cores and merges the trees' root stats.
 const coach = new EnginePool('coach', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2)));
+// Answers "what would the opponent play if I passed?"
+const scout = new Engine('scout');
 const view = new BoardView($('#board'), { onClick, onHover });
 
 // ------------------------------------------------------------------ helpers
@@ -158,6 +162,30 @@ function resignOrScore() {
   resigned = settings.human;
   flash('You resigned. No shame in that — step back through the game to see where it turned.');
   afterChange();
+}
+
+// Shows what the opponent wants to play: search the position as if the side to move passed.
+async function toggleThreat() {
+  const node = game.current;
+  if (threat && threat.node === node) { threat = null; scout.cancel(); render(); return; }
+  if (mode !== 'play' || game.isOver(node)) return;
+  const me = node.board.toPlay, opp = 3 - me;
+  const recipe = game.recipe(node);
+  recipe.moves = [...recipe.moves, [PASS, me]];
+  threat = { node, pending: true };
+  render();
+  const res = await scout.search(recipe, { playouts: 8000, reportMs: 0 });
+  if (!threat || threat.node !== node) return;
+  const m = res && res.moves.find(x => x.move !== PASS);
+  if (!m) { threat = res ? { node, none: true } : null; render(); return; }
+  const passed = node.board.clone();
+  passed.play(PASS);
+  const after = passed.clone();
+  after.play(m.move);
+  const sgn = me === BLACK ? 1 : -1;
+  const cost = node.analysis ? (node.analysis.score - res.score) * sgn : null;
+  threat = { node, opp, me, move: m.move, pv: pvStones(opp, [m.move, ...(m.pv || [])]), explain: explainMove(passed, after, m.move), cost };
+  render();
 }
 
 // ------------------------------------------------------------------ AI opponent
@@ -341,6 +369,7 @@ function render() {
   renderNav();
   renderStatus();
   renderGraph($('#graph'), game.line(), game.current, goTo);
+  renderReview();
 }
 
 function moveNumbers(node) {
@@ -401,8 +430,10 @@ function renderBoard() {
     if (m && m.pv) s.pv = pvStones(b.toPlay, [m.move, ...m.pv]);
   }
   if (better && better.node === node) { s.better = better.move; s.pv = better.pv; }
+  if (threat && threat.node === node && threat.move) { s.threat = threat.move; s.pv = threat.pv; s.pvAccent = '#e03131'; }
   if (sh.feedback && node.grade && ['mistake', 'blunder'].includes(node.grade.grade)) s.grade = GRADES[node.grade.grade].color;
-  if (!s.pv) s.hover = hoverInfo();
+  if (s.pv) s.liberties = false; // numbered continuation stones would be confused with liberty counts
+  else s.hover = hoverInfo();
   view.render(s);
 }
 
@@ -457,11 +488,62 @@ function renderCoach() {
       if (t.libs.length !== 1) continue;
       const n = t.stones.length, where = ptName(t.stones[0]), lib = ptName(t.libs[0]);
       const stones = n > 1 ? `${n} stones at ${where} are` : `stone at ${where} is`;
-      if (t.color === me) warn += `<li class="warn">${whose(t.color)} ${stones} in atari. Extending at ${lib} only helps if it gains liberties.</li>`;
-      else warn += `<li class="chance">${whose(t.color)} ${stones} in atari: ${who(me) === 'You' ? 'you' : colorName(me)} can capture at ${lib}.</li>`;
+      if (t.color === me) {
+        const trapped = ladderCapture(b, t.stones[0]);
+        warn += trapped
+          ? `<li class="warn">${whose(t.color)} ${stones} in atari and can't escape: running at ${lib} just leads to capture (a ladder or a dead end). Often it's better to play elsewhere.</li>`
+          : `<li class="warn">${whose(t.color)} ${stones} in atari. Run at ${lib}, or capture a neighbour, to save ${n > 1 ? 'them' : 'it'}.</li>`;
+      } else {
+        warn += `<li class="chance">${whose(t.color)} ${stones} in atari: ${who(me) === 'You' ? 'you' : colorName(me)} can capture at ${lib}.</li>`;
+      }
     }
   }
   $('#warnings').innerHTML = warn;
+
+  const tb = $('#threatBox');
+  tb.hidden = !(threat && threat.node === node);
+  if (!tb.hidden) {
+    if (threat.pending) tb.innerHTML = 'Looking at the board from the opponent\'s side…';
+    else if (threat.none) tb.innerHTML = 'The opponent has nothing urgent here.';
+    else {
+      const oppName = !settings.human ? colorName(threat.opp) : threat.opp === settings.human ? 'you' : 'the AI';
+      tb.innerHTML = `<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
+        (threat.cost >= 1 ? ` Ignoring it costs about <b>${threat.cost.toFixed(0)} points</b>.` : '') + '</p>' +
+        `<ul class="explain">${threat.explain.map(t => `<li>${t}</li>`).join('')}</ul>` +
+        '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>';
+    }
+  }
+}
+
+function renderReview() {
+  const el = $('#review');
+  const stats = {};
+  for (const c of [BLACK, WHITE]) stats[c] = { n: 0, loss: 0, inaccuracy: 0, mistake: 0, blunder: 0, worst: [] };
+  for (const n of game.line()) {
+    const g = n.grade;
+    if (!g || n.move === PASS) continue;
+    const s = stats[n.color];
+    s.n++;
+    s.loss += Math.min(g.ptLoss, 30);
+    if (g.grade in s) s[g.grade]++;
+    if (g.grade === 'mistake' || g.grade === 'blunder') s.worst.push(n);
+  }
+  if (!stats[BLACK].n && !stats[WHITE].n) { el.innerHTML = ''; return; }
+  const row = c => {
+    const s = stats[c];
+    if (!s.n) return '';
+    const pills = ['blunder', 'mistake', 'inaccuracy'].filter(k => s[k])
+      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${s[k]} ${GRADES[k].label.toLowerCase()}${s[k] > 1 ? 's' : ''}</span>`).join(' ');
+    return `<div class="rv-row"><span class="stone-icon ${c === BLACK ? 'black' : 'white'}"></span><b>${who(c)}</b>` +
+      `<span class="muted">avg −${(s.loss / s.n).toFixed(1)} pts/move</span>${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
+  };
+  const worst = [...stats[BLACK].worst, ...stats[WHITE].worst].sort((a, b) => b.grade.ptLoss - a.grade.ptLoss).slice(0, 5);
+  el.innerHTML = row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>` +
+    worst.map(n => `<button class="chip" data-id="${n.id}" title="Jump to this move">#${n.depth} ${ptName(n.move)} −${n.grade.ptLoss.toFixed(0)}</button>`).join('') + '</div>' : '');
+  el.onclick = e => {
+    const node = worst.find(n => n.id === +(e.target.dataset && e.target.dataset.id));
+    if (node) goTo(node);
+  };
 }
 
 function moveEntry(node) {
@@ -486,12 +568,25 @@ function moveEntry(node) {
   return `<div class="fb-entry${latest ? ' latest' : ''}">${html}</div>`;
 }
 
+// Suggests a better-matched opponent after a lopsided game. margin is black-minus-white.
+function levelAdvice(margin) {
+  if (!settings.human) return '';
+  const mine = margin * (settings.human === BLACK ? 1 : -1), lv = settings.level;
+  if (mine >= 15 && lv < LEVELS.length - 1) {
+    return `<p class="advice">Comfortable win! Try level ${lv + 2} · ${LEVELS[lv + 1].name} next (Settings → AI strength).</p>`;
+  }
+  if (mine <= -25 && lv > 0) {
+    return `<p class="advice">A tough one. Level ${lv} · ${LEVELS[lv - 1].name}, or a 2–3 stone handicap, may be more fun for learning.</p>`;
+  }
+  return '';
+}
+
 function renderScorePanel() {
   const el = $('#scorePanel');
   if (!scoring && !resigned) { el.hidden = true; return; }
   el.hidden = false;
   if (resigned && !scoring) {
-    el.innerHTML = `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>
+    el.innerHTML = `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${levelAdvice(resigned === BLACK ? -99 : 99)}
       <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`;
   } else if (scoring.pending) {
     el.innerHTML = '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>';
@@ -501,7 +596,7 @@ function renderScorePanel() {
       s.winner === settings.human ? 'You win! 🎉' : 'The AI wins this one.';
     const tm = s.territory.margin;
     el.innerHTML = `<h2>Game over · ${s.text}</h2>
-      <p class="big">${winText}</p>
+      <p class="big">${winText}</p>${levelAdvice(s.margin)}
       <table class="score-table">
         <tr><th></th><th>Black</th><th>White</th></tr>
         <tr><td>Stones + surrounded area</td><td>${s.black}</td><td>${s.white}</td></tr>
@@ -532,6 +627,8 @@ function renderNav() {
   $('#btnResign').textContent = game.isOver() ? 'Count' : 'Resign';
   $('#btnResign').disabled = mode === 'score' || (!game.isOver() && (!settings.human || !!resigned));
   $('#btnHint').classList.toggle('on', hintOn);
+  $('#btnThreat').classList.toggle('on', !!threat && threat.node === node);
+  $('#btnThreat').disabled = mode !== 'play' || game.isOver();
 
   let html = '';
   const sibs = node.parent ? node.parent.children : [];
@@ -687,6 +784,7 @@ function setupControls() {
     render();
   };
   $('#btnAI').onclick = () => aiMove(true);
+  $('#btnThreat').onclick = toggleThreat;
   $('#btnResign').onclick = resignOrScore;
   $('#btnNew').onclick = openNewGame;
   $('#btnExport').onclick = exportSGF;
@@ -701,7 +799,7 @@ function setupControls() {
   const toggleKey = { l: 'liberties', a: 'atari', t: 'territory', v: 'preview', g: 'feedback', b: 'best', n: 'numbers' };
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.target.closest('input, select, textarea, dialog')) return;
+    if (e.target instanceof Element && e.target.closest('input, select, textarea, dialog')) return;
     const k = e.key.toLowerCase();
     if (e.key === 'ArrowLeft') nav('prev');
     else if (e.key === 'ArrowRight') nav('next');
@@ -709,8 +807,9 @@ function setupControls() {
     else if (e.key === 'End') nav('last');
     else if (k === 'u' || e.key === 'Backspace') takeBack();
     else if (k === 'h') $('#btnHint').click();
+    else if (k === 'o') toggleThreat();
     else if (k === 'p') humanPass();
-    else if (e.key === 'Escape') { better = null; hintOn = false; render(); }
+    else if (e.key === 'Escape') { better = null; hintOn = false; threat = null; render(); }
     else if (toggleKey[k]) {
       const key = toggleKey[k] === 'best' ? 'hints' : toggleKey[k];
       settings.show[key] = !settings.show[key];

@@ -2,14 +2,18 @@
 // move choice, when to pass, dead stones, move grading and plain-language
 // explanations. Pure functions — no DOM, testable in node.
 import { BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, DIAG, N, ptX, ptY, ptName } from './board.js';
+import { ladderCapture, ladderThreat } from './ladder.js';
 
+// Each level beat the one below it clearly in self-play (tools/levels.js).
 export const LEVELS = [
-  { name: 'Pebble', blurb: 'Plays almost randomly nearby. Good for learning captures.', playouts: 120, temp: 1, blunder: 0.25 },
-  { name: 'Sprout', blurb: 'Knows captures and simple shapes, misses a lot.', playouts: 400, temp: 1.5, blunder: 0.12 },
-  { name: 'Stream', blurb: 'Casual player. Makes real mistakes.', playouts: 1500, temp: 2.5, blunder: 0.05 },
-  { name: 'River', blurb: 'Solid club-level fighting on a small board.', playouts: 5000, temp: 5, blunder: 0 },
+  { name: 'Pebble', blurb: 'Plays almost at random. Practise capturing.', playouts: 50, temp: 1, blunder: 0.3 },
+  { name: 'Seedling', blurb: 'Grabs captures, wanders a lot.', playouts: 150, temp: 1, blunder: 0.18 },
+  { name: 'Sprout', blurb: 'Knows simple shapes, still misses plenty.', playouts: 400, temp: 1.5, blunder: 0.1 },
+  { name: 'Reed', blurb: 'Fights back, but leaves weaknesses.', playouts: 900, temp: 2, blunder: 0.06 },
+  { name: 'Stream', blurb: 'Casual player. Makes real mistakes.', playouts: 2000, temp: 3, blunder: 0.03 },
+  { name: 'River', blurb: 'Solid fighting on a small board.', playouts: 5000, temp: 5, blunder: 0 },
   { name: 'Mountain', blurb: 'Strong. Punishes overplays.', playouts: 16000, temp: 0, blunder: 0 },
-  { name: 'Dragon', blurb: 'Full strength (thinks for several seconds).', playouts: 60000, temp: 0, blunder: 0 },
+  { name: 'Dragon', blurb: 'Full strength. Thinks for several seconds.', playouts: 60000, temp: 0, blunder: 0 },
 ];
 
 const sign = c => c === BLACK ? 1 : -1;
@@ -145,24 +149,32 @@ export function explainMove(before, after, move, ownBefore, ownAfter) {
   const newLibs = chainLibsAfterMove(after, move);
   if (rescued.size) {
     const n = [...rescued].reduce((s, h) => s + before.size[h], 0);
-    out.push(newLibs >= 2 ? `Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.` :
-      `Tries to save ${n === 1 ? 'a stone' : `${n} stones`} in atari, but ${n === 1 ? 'it is' : 'they are'} still in atari.`);
+    const them = n === 1 ? 'it' : 'they';
+    if (newLibs >= 3) out.push(`Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.`);
+    else if (newLibs === 2) {
+      out.push(ladderThreat(after, move)
+        ? `Runs from atari, but with only 2 liberties ${them} can still be chased down in a ladder.`
+        : `Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.`);
+    } else out.push(`Tries to save ${n === 1 ? 'a stone' : `${n} stones`} in atari, but ${them} ${n === 1 ? 'is' : 'are'} still in atari.`);
   }
 
   // Enemy chains now in atari (that weren't before).
   const seen = new Set();
-  let atariCount = 0, atariStones = 0;
+  let atariCount = 0, atariStones = 0, atariAt = 0;
   for (const d of D4) {
     const q = move + d;
     if (after.color[q] !== o) continue;
     const h = after.head[q];
     if (seen.has(h)) continue;
     seen.add(h);
-    if (after.inAtari(h) && !before.inAtari(before.head[q])) { atariCount++; atariStones += after.size[h]; }
+    if (after.inAtari(h) && !before.inAtari(before.head[q])) { atariCount++; atariStones += after.size[h]; atariAt = q; }
   }
-  if (atariCount) {
-    out.push(atariCount > 1 ? `Double atari! Threatens two groups at once.` :
-      `Atari: threatens to capture ${atariStones} stone${atariStones > 1 ? 's' : ''} next move.`);
+  if (atariCount > 1) out.push('Double atari! Threatens two groups at once.');
+  else if (atariCount) {
+    const s = atariStones > 1 ? 's' : '';
+    const trapped = ladderCapture(after, atariAt);
+    out.push(`Atari: threatens to capture ${atariStones} stone${s} next move.` +
+      (trapped ? (trapped.length >= 3 ? ` Running away won't work: it's a ladder.` : ` ${atariStones > 1 ? 'They' : 'It'} can't escape.`) : ''));
   }
 
   // Connections and cuts.

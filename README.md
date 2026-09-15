@@ -13,8 +13,9 @@ it needs the tiny static server rather than opening `index.html` from disk.
 
 ## What it does
 
-- **Play** as Black or White against six AI levels (Pebble → Dragon), with
-  handicap and komi, or play both colours in **study mode**.
+- **Play** as Black or White against eight AI levels (Pebble → Dragon), with
+  handicap and komi, or play both colours in **study mode**. After a lopsided
+  game it suggests a better-matched level.
 - **Take back** any move. Nothing is lost: the game is a tree, so trying another
   move after a take-back creates a variation you can switch between.
 - **Coach** (a second engine in its own worker) reads every position in the
@@ -23,10 +24,15 @@ it needs the tiny static server rather than opening `index.html` from disk.
   - a grade for your move *and* the AI's reply (best / good / inaccuracy /
     mistake / blunder), in points lost, with **Show** (coach's move plus the
     expected continuation as numbered stones) and **Try it instead**
-  - plain-language explanations: captures, atari, double atari, saving stones,
-    connecting, cutting, self-atari warnings, filling your own eye, area swings
-  - live warnings for groups in atari (yours and theirs)
-  - a game graph (win % and score lead) with mistakes marked; click to jump
+  - plain-language explanations: captures, atari, double atari, ladders,
+    saving stones, connecting, cutting, self-atari warnings, filling your own
+    eye, area swings
+  - live warnings for groups in atari (yours and theirs), including "can't
+    escape, it's a ladder"
+  - **Their idea** (<kbd>O</kbd>): what the opponent would play if you
+    played elsewhere, how they expect it to continue, and what ignoring it costs
+  - a game graph (win % and score lead) with mistakes marked; click to jump,
+    plus a mistake summary with jump buttons to the biggest ones
 - **Board overlays**: liberties on every group, atari alerts, territory and
   dead-stone estimate, move preview on hover (✕ on stones you'd capture, new
   ataris, your stone's liberties, and why a move is illegal), best moves with
@@ -45,7 +51,10 @@ it needs the tiny static server rather than opening `index.html` from disk.
 | `src/mcts.js` | MCTS + RAVE (michi-style priors), heuristic playouts, score-aware reward, ownership, principal variations |
 | `src/game.js` | game tree, rule checks with reasons (ko, suicide, superko), scoring, SGF |
 | `src/coach.js` | AI levels, move choice, pass decision, dead stones, move grading, explanations |
+| `src/ladder.js` | ladder reader (capture-by-chasing) used by explanations and warnings |
 | `src/engine-worker.js`, `src/engine-client.js` | search in a worker with progress streaming |
 | `src/view.js`, `src/graph.js`, `src/sound.js`, `src/app.js` | UI |
 | `tools/bench.js` | playout speed |
 | `tools/selfplay.js` | equal-time A/B self-play between parameter sets |
+| `tools/levels.js` | plays AI level vs level to check strength ordering |
+| `tools/explain-demo.js` | prints grades + explanations for a self-play game (wording QA) |

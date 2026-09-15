@@ -193,11 +193,17 @@ export class BoardView {
           `<text x="${X(h.move)}" y="${Y(h.move) + 22}" class="hint-sub">${h.sub}</text></g>`;
       }
     }
+    if (s.threat) {
+      hints += `<circle cx="${X(s.threat)}" cy="${Y(s.threat)}" r="${R + 4}" fill="none" stroke="${RED}" stroke-width="9" stroke-dasharray="16 9"/>`;
+    }
     if (s.pv) {
+      const shown = new Set();
       s.pv.forEach((mv, i) => {
-        if (mv.move === PASS || b.color[mv.move] !== EMPTY) return;
+        // Later moves can land where a stone was captured along the way; keep the first.
+        if (mv.move === PASS || b.color[mv.move] !== EMPTY || shown.has(mv.move)) return;
+        shown.add(mv.move);
         hints += `<circle cx="${X(mv.move)}" cy="${Y(mv.move)}" r="${R}" fill="url(#${mv.color === BLACK ? 'gB' : 'gW'})" opacity="0.72"/>` +
-          `<text x="${X(mv.move)}" y="${Y(mv.move) + 2}" class="stone-num" fill="${i === 0 ? GREEN : ink(mv.color)}" font-size="42">${i + 1}</text>`;
+          `<text x="${X(mv.move)}" y="${Y(mv.move) + 2}" class="stone-num" fill="${i === 0 ? (s.pvAccent || GREEN) : ink(mv.color)}" font-size="42">${i + 1}</text>`;
       });
     }
     this.layers.hints.innerHTML = hints;
