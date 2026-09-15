@@ -258,8 +258,13 @@ export class Game {
     };
     walk(tree, game.root, true);
     game.current = game.root;
-    // Follow the first branch everywhere by default.
-    for (const n of game.line(game.root)) if (n.parent) n.parent.lastChild = n.parent.lastChild || n;
+    // Follow the first (main) variation everywhere by default.
+    const stack = [game.root];
+    while (stack.length) {
+      const n = stack.pop();
+      n.lastChild = n.children[0] || null;
+      stack.push(...n.children);
+    }
     return game;
   }
 }

@@ -99,6 +99,12 @@ test('SGF round trip keeps moves, variations and comments', () => {
   assert.equal(h.toSGF({ result: 'B+R' }), sgf);
 });
 
+test('SGF import follows the main (first) variation', () => {
+  const h = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[cc];B[gg])(;W[gc]))');
+  const line = h.line(h.root);
+  assert.deepEqual(line.slice(1).map(n => ptName(n.move)), ['E5', 'C7', 'G3']);
+});
+
 test('SGF import of handicap setup', () => {
   const h = Game.fromSGF('(;GM[1]SZ[9]HA[2]KM[0.5]AB[gc][cg];W[ee];B[dd])');
   assert.equal(h.root.board.color[pt(6, 2)], BLACK);

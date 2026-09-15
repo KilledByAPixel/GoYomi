@@ -11,7 +11,7 @@ channel.port1.onmessage = step;
 const yieldThen = () => channel.port2.postMessage(0);
 
 // Rebuild the position (and superko history) from a recipe.
-function build({ setup, moves, whiteFirst }) {
+function build({ setup, moves, whiteFirst, resetPasses }) {
   const b = new Board();
   for (const [p, c] of setup) { b.toPlay = c; b.play(p); }
   b.toPlay = whiteFirst ? WHITE : BLACK;
@@ -21,6 +21,7 @@ function build({ setup, moves, whiteFirst }) {
     if (Array.isArray(m)) { b.toPlay = m[1]; b.play(m[0]); } else b.play(m);
     seen.add(b.hash);
   }
+  if (resetPasses) b.passes = 0;
   return { board: b, seen };
 }
 

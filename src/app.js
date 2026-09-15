@@ -109,6 +109,9 @@ function playMove(move) {
   tryGrade(node);
   if (game.isOver()) { save(); enterScoring(); return true; }
   afterChange();
+  // Replaying a move that already has a (taken-back) AI reply below it: the
+  // node isn't a leaf, but the AI should still answer.
+  if (aiColor() && !resigned && game.toPlay === aiColor() && mode === 'play') aiMove(true);
   return true;
 }
 
@@ -172,6 +175,7 @@ async function toggleThreat() {
   const me = node.board.toPlay, opp = 3 - me;
   const recipe = game.recipe(node);
   recipe.moves = [...recipe.moves, [PASS, me]];
+  recipe.resetPasses = true; // the imagined pass must not end the game after a real pass
   threat = { node, pending: true };
   render();
   const res = await scout.search(recipe, { playouts: 8000, reportMs: 0 });
@@ -250,7 +254,10 @@ function scheduleCoach() {
   if (!settings.coach || (scoring && scoring.pending)) return;
   const target = pickCoachTarget();
   if (!target) return;
-  if (coachNode && (coachNode === target || target !== game.current)) return;
+  // Don't pre-empt background work, nor the read of the move just before the
+  // current one (it's needed to grade that move; a fast AI reply would otherwise
+  // restart it forever).
+  if (coachNode && (coachNode === target || target !== game.current || coachNode === game.current.parent)) return;
   coachNode = target;
   coach.search(game.recipe(target), {
     playouts: settings.coachPlayouts,
@@ -332,6 +339,7 @@ function goTo(node) {
   better = null; hintOn = false;
   game.goTo(node);
   save(); render(); scheduleCoach();
+  aiMove(); // back at the newest position with the AI to move (only fires on a leaf)
 }
 
 function nav(where) {
@@ -768,6 +776,8 @@ function setupControls() {
   $('#optLevel').innerHTML = LEVELS.map((l, i) => `<option value="${i}">${i + 1} · ${l.name}</option>`).join('');
   $('#optLevel').onchange = e => { settings.level = +e.target.value; save(); render(); };
   $('#optCoach').onchange = e => {
+    // Cancelling the coach now would also cancel the dead-stone search.
+    if (scoring && scoring.pending) { e.target.value = String(settings.coachPlayouts); return; }
     settings.coachPlayouts = +e.target.value;
     // Re-read positions at the new depth.
     for (const n of game.line()) n.analysisDone = false;
