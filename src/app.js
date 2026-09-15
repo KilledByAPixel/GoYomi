@@ -2,7 +2,7 @@
 // engine and the board view together.
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
-import { Engine } from './engine-client.js';
+import { Engine, EnginePool } from './engine-client.js';
 import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, GRADES, explainMove, threats, describeScore } from './coach.js';
 import { BoardView } from './view.js';
 import { renderGraph } from './graph.js';
@@ -46,7 +46,8 @@ let aiNode = null, aiToken = 0;
 let coachNode = null;
 
 const opponent = new Engine('opponent');
-const coach = new Engine('coach');
+// The coach searches the same position on several cores and merges the trees' root stats.
+const coach = new EnginePool('coach', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2)));
 const view = new BoardView($('#board'), { onClick, onHover });
 
 // ------------------------------------------------------------------ helpers
@@ -250,7 +251,8 @@ function onAnalysis(node) {
   for (const ch of node.children) tryGrade(ch);
   if (analysisRenderPending) return;
   analysisRenderPending = true;
-  requestAnimationFrame(() => { analysisRenderPending = false; render(); });
+  // setTimeout rather than requestAnimationFrame: rAF stalls in hidden tabs/panes.
+  setTimeout(() => { analysisRenderPending = false; render(); }, 30);
 }
 
 // ------------------------------------------------------------------ scoring
@@ -386,7 +388,7 @@ function renderBoard() {
     board: b, nodeId: node.id,
     lastMove: node.parent ? node.move : PASS,
     captured: node.captured, capturedColor: 3 - node.color,
-    liberties: sh.liberties,
+    liberties: sh.liberties && mode === 'play',
   };
   if (sh.numbers) s.numbers = moveNumbers(node);
   if (sh.atari && mode === 'play') s.threats = threats(b).filter(t => t.libs.length === 1);
@@ -432,36 +434,20 @@ function renderCoach() {
   $('#winLabelW').textContent = an ? `${Math.round((1 - bw) * 100)}% White` : 'White';
   $('#scoreEst').innerHTML = an ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi})</span>` : '&nbsp;';
 
+  // Feedback on the last two moves, so against the AI you see your own move's
+  // grade as well as the reply.
   const fb = $('#feedback');
-  let html = '';
-  if (!node.parent) html = `<p class="tip">${openingTip()}</p>`;
-  else if (node.move === PASS) html = `<p><b>${who(node.color)}</b> passed.</p>`;
-  else if (settings.show.feedback) {
-    const g = node.grade;
-    const head = pill => `<div class="fb-head">${pill} <span><b>${who(node.color)}</b> played <b>${ptName(node.move)}</b></span></div>`;
-    if (!g) html = head('<span class="pill pending">grading…</span>');
-    else {
-      const G = GRADES[g.grade];
-      html = head(`<span class="pill" style="--pill:${G.color}">${G.label}</span>`);
-      if (g.grade === 'best') html += '<p>Exactly the coach\'s choice.</p>';
-      else if (g.grade === 'good') html += `<p>A fine move. The coach slightly preferred <b>${ptName(g.bestMove)}</b>.</p>`;
-      else html += `<p>About <b>${g.ptLoss.toFixed(1)} points</b> worse than <b>${ptName(g.bestMove)}</b>${g.wrLoss >= 0.01 ? ` (win chance −${Math.round(g.wrLoss * 100)}%)` : ''}.</p>`;
-      if (g.grade !== 'best' && g.bestMove !== PASS) {
-        html += `<div class="fb-actions"><button data-act="show">Show ${ptName(g.bestMove)}</button><button data-act="try">Try ${ptName(g.bestMove)} instead</button></div>`;
-      }
-    }
-  } else {
-    html = `<div class="fb-head"><span><b>${who(node.color)}</b> played <b>${ptName(node.move)}</b></span></div>`;
-  }
-  fb.innerHTML = html;
+  const entries = [];
+  if (node.parent && node.parent.parent) entries.push(node.parent);
+  if (node.parent) entries.push(node);
+  fb.innerHTML = entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`;
   fb.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
-    if (act === 'show') showBetter(node);
-    if (act === 'try') tryInstead(node);
+    const target = entries.find(n => n.id === +e.target.dataset.id);
+    if (!target) return;
+    if (act === 'show') showBetter(target);
+    if (act === 'try') tryInstead(target);
   };
-
-  const ex = $('#explain');
-  ex.innerHTML = node.parent && node.explain ? node.explain.map(t => `<li>${t}</li>`).join('') : '';
 
   // Live warnings about the position on the board.
   const b = node.board, me = b.toPlay;
@@ -476,6 +462,28 @@ function renderCoach() {
     }
   }
   $('#warnings').innerHTML = warn;
+}
+
+function moveEntry(node) {
+  const latest = node === game.current;
+  const head = pill => `<div class="fb-head">${pill}<span><b>${who(node.color)}</b> ${node.move === PASS ? 'passed' : `played <b>${ptName(node.move)}</b>`}</span></div>`;
+  let html = '';
+  const g = node.grade;
+  if (node.move === PASS || !settings.show.feedback) html = head('');
+  else if (!g) html = head('<span class="pill pending">grading…</span>');
+  else {
+    const G = GRADES[g.grade];
+    html = head(`<span class="pill" style="--pill:${G.color}">${G.label}</span>`);
+    if (g.grade === 'best') html += '<p>Exactly the coach\'s choice.</p>';
+    else if (g.grade === 'good') html += `<p>A fine move. The coach slightly preferred <b>${ptName(g.bestMove)}</b>.</p>`;
+    else html += `<p>About <b>${g.ptLoss.toFixed(1)} points</b> worse than <b>${ptName(g.bestMove)}</b>${g.wrLoss >= 0.01 ? ` (win chance −${Math.round(g.wrLoss * 100)}%)` : ''}.</p>`;
+    if (g.grade !== 'best' && g.bestMove !== PASS) {
+      html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}">Show ${ptName(g.bestMove)}</button>` +
+        `<button data-act="try" data-id="${node.id}">Try ${ptName(g.bestMove)} instead</button></div>`;
+    }
+  }
+  if (node.explain && node.move !== PASS) html += `<ul class="explain">${node.explain.map(t => `<li>${t}</li>`).join('')}</ul>`;
+  return `<div class="fb-entry${latest ? ' latest' : ''}">${html}</div>`;
 }
 
 function renderScorePanel() {
@@ -720,4 +728,16 @@ syncOptions();
 afterChange();
 
 // Handy for debugging from the console.
-window.dojo = { get game() { return game; }, settings, render, aiMove, coach, opponent };
+window.dojo = {
+  get game() { return game; },
+  get settings() { return settings; },
+  get mode() { return mode; },
+  get scoring() { return scoring; },
+  get aiThinking() { return !!aiNode; },
+  render, aiMove, coach, opponent,
+  // Test hooks: play by name ("E5"), pass, take back, start a game with options.
+  play: name => onClick(POINTS.find(p => ptName(p) === name.toUpperCase())),
+  pass: humanPass,
+  takeBack,
+  newGame: (opts = {}) => { Object.assign(settings, opts); syncOptions(); newGame(); },
+};

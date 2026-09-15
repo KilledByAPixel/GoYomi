@@ -134,6 +134,10 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 
 .feedback p { margin: 6px 0; }
 .feedback .tip { color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); padding: 8px 10px; border-radius: 8px; }
+.fb-entry { padding: 8px 0; }
+.fb-entry + .fb-entry { border-top: 1px solid var(--line); }
+.fb-entry:not(.latest) { opacity: .8; }
+.fb-entry:first-child { padding-top: 0; }
 .fb-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pill {
   display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
