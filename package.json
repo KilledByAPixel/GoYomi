@@ -1,0 +1,11 @@
+{
+  "name": "go-dojo",
+  "version": "0.1.0",
+  "description": "9x9 Go vs a Monte-Carlo AI, with a coach that visualises and explains as you play.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node serve.js 8115",
+    "test": "node --test test/*.test.js"
+  }
+}
