@@ -29,6 +29,7 @@ for (let g = 0; g < games; g++) {
     winner = sc.winner; how = sc.text;
   }
   if (winner === aColor) aWins++; else if (winner) bWins++;
-  console.log(`game ${g + 1}: L${la + 1} as ${aColor === BLACK ? 'B' : 'W'} → ${winner === aColor ? `L${la + 1}` : `L${lb + 1}`} wins (${how}, ${game.current.depth} moves)`);
+  const who = !winner ? 'nobody' : winner === aColor ? `L${la + 1}` : `L${lb + 1}`;
+  console.log(`game ${g + 1}: L${la + 1} as ${aColor === BLACK ? 'B' : 'W'} → ${who} wins (${how}, ${game.current.depth} moves)`);
 }
 console.log(`RESULT L${la + 1} ${aWins} - L${lb + 1} ${bWins}`);
