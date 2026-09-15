@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Go Dojo · 9×9</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23dcb066'/><circle cx='24' cy='28' r='14' fill='%23111'/><circle cx='42' cy='38' r='14' fill='%23fafafa' stroke='%23999'/></svg>">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="src/app.js"></script>
+</head>
+<body>
+<div class="app">
+  <main class="board-col">
+    <header class="topbar">
+      <div class="brand">Go Dojo <span>9×9</span></div>
+      <div class="players">
+        <div class="player" id="pBlack" title="Captured stones">
+          <span class="stone-icon black"></span><span class="pname">Black</span><span class="caps">0</span>
+        </div>
+        <div class="player" id="pWhite" title="Captured stones">
+          <span class="stone-icon white"></span><span class="pname">White</span><span class="caps">0</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="board" class="board-wrap"></div>
+
+    <div id="message" class="message" role="status" aria-live="polite"></div>
+
+    <div class="controls">
+      <button id="btnPass" title="Pass (P)">Pass</button>
+      <button id="btnUndo" title="Take back your last move (U)">↶ Take back</button>
+      <button id="btnHint" title="Show the coach's best moves (H)">💡 Hint</button>
+      <button id="btnAI" title="Let the AI play a move for the side to move">🤖 AI move</button>
+      <button id="btnResign">Resign</button>
+      <button id="btnNew" class="primary">New game</button>
+    </div>
+
+    <div class="nav">
+      <button data-nav="first" title="Start (Home)">⏮</button>
+      <button data-nav="prev" title="Back (←)">◀</button>
+      <span id="moveLabel" class="move-label">Start</span>
+      <button data-nav="next" title="Forward (→)">▶</button>
+      <button data-nav="last" title="Latest (End)">⏭</button>
+    </div>
+    <div id="variations" class="variations"></div>
+  </main>
+
+  <aside class="side">
+    <section id="scorePanel" class="card score-panel" hidden></section>
+
+    <section class="card coach">
+      <h2>Coach <span id="coachStatus" class="muted small"></span></h2>
+      <div class="winbar" title="Chance of winning, according to the coach">
+        <div class="winbar-b" id="winB"></div>
+        <span id="winLabelB" class="wl wl-b">Black</span>
+        <span id="winLabelW" class="wl wl-w">White</span>
+      </div>
+      <div id="scoreEst" class="score-est">&nbsp;</div>
+      <div id="feedback" class="feedback"></div>
+      <ul id="explain" class="explain"></ul>
+      <ul id="warnings" class="warnings"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Game graph <span class="muted small">click to jump</span></h2>
+      <div id="graph" class="graph"></div>
+      <div class="legend">
+        <span><i class="lg-wr"></i>Black win %</span>
+        <span><i class="lg-score"></i>Score lead</span>
+        <span><i class="lg-dot" style="background:#e07b2c"></i>Mistake</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Show on board</h2>
+      <div id="toggles" class="toggles"></div>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <div class="settings">
+        <label>AI strength <select id="optLevel"></select></label>
+        <label>Coach depth
+          <select id="optCoach">
+            <option value="6000">Quick</option>
+            <option value="16000">Normal</option>
+            <option value="50000">Deep (slower)</option>
+          </select>
+        </label>
+        <label class="inline"><input type="checkbox" id="optSound"> Sound</label>
+        <div class="row">
+          <button id="btnExport">Save SGF</button>
+          <button id="btnImport">Load SGF</button>
+          <input type="file" id="fileInput" accept=".sgf,text/plain" hidden>
+        </div>
+      </div>
+    </section>
+
+    <section class="card learn">
+      <h2>Learn</h2>
+      <details open>
+        <summary>The rules in one minute</summary>
+        <p>Players take turns placing a stone on an empty intersection. Stones never move.</p>
+        <p><b>Liberties</b> are the empty points right next to a group (up, down, left, right). Stones touching in a line share liberties.</p>
+        <p><b>Capture:</b> fill a group's last liberty and it's removed. A group with one liberty left is in <b>atari</b>.</p>
+        <p><b>No suicide:</b> you can't play where your stone would have no liberties, unless that move captures.</p>
+        <p><b>Ko:</b> if you just captured one stone, your opponent can't immediately recapture in a way that repeats the board. They must play elsewhere first.</p>
+        <p><b>End:</b> when both players pass in a row. Your score is your stones plus the empty points only you surround. White gets <b>komi</b> for moving second.</p>
+      </details>
+      <details>
+        <summary>Life and death</summary>
+        <p>A group is safe forever if it has <b>two separate eyes</b> (enclosed empty points). The opponent can't fill both, because playing into either one alone would be suicide.</p>
+        <p>A group with only one eye, or none, can eventually be surrounded and captured.</p>
+        <p>Turn on <b>Territory</b> to see which groups the coach thinks are dead. They get a small square.</p>
+      </details>
+      <details>
+        <summary>Tips for 9×9</summary>
+        <ul>
+          <li>Start in the centre (E5) or on the 3-3 / 3-4 points (C3, G7…). First-line moves are small early on.</li>
+          <li>Stay connected. On a small board, cut-apart groups die fast.</li>
+          <li>Before each move, look for groups in <b>atari</b> (yours and theirs).</li>
+          <li>Don't chase stones you can't capture. Build territory while you attack.</li>
+          <li>Capturing is nice, but the winner is whoever surrounds more area.</li>
+          <li>Unsure? Hover a point: the preview shows captures, ataris and your stone's liberties.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Keyboard</summary>
+        <p><kbd>←</kbd>/<kbd>→</kbd> step · <kbd>U</kbd> take back · <kbd>H</kbd> hint · <kbd>P</kbd> pass · <kbd>Esc</kbd> clear markers<br>
+        <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers</p>
+      </details>
+    </section>
+  </aside>
+</div>
+
+<dialog id="newGameDlg">
+  <form method="dialog">
+    <h2>New game</h2>
+    <fieldset>
+      <legend>You play</legend>
+      <div class="seg">
+        <label><input type="radio" name="color" value="1"><span>⚫ Black (first)</span></label>
+        <label><input type="radio" name="color" value="2"><span>⚪ White</span></label>
+        <label><input type="radio" name="color" value="0"><span>Both (study)</span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Opponent strength</legend>
+      <div id="levelList" class="levels"></div>
+    </fieldset>
+    <fieldset class="row">
+      <label>Handicap stones
+        <select name="handicap">
+          <option value="0">None</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        </select>
+      </label>
+      <label>Komi <input name="komi" type="number" step="0.5" min="-20" max="20"></label>
+    </fieldset>
+    <p class="muted small">Handicap stones go to Black. Use them when the AI is winning too easily.</p>
+    <menu>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="ok" class="primary">Start</button>
+    </menu>
+  </form>
+</dialog>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "go",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["serve.js", "8115"],
+      "port": 8115
+    }
+  ]
+}

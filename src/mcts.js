@@ -15,9 +15,14 @@ export const PARAMS = {
   priorCfg: [24, 22, 8],
   priorEmptyArea: 10,
   probCapture: 0.9,
+  probGlobalAtari: 0.5,
   probPat3: 0.95,
   probRejectHeuristicSelfAtari: 0.9,
   probRejectRandomSelfAtari: 0.5,
+  // Reward = mix of win/loss and a squashed score margin, so the search keeps
+  // preferring bigger margins once the game is decided (important for teaching).
+  scoreWeight: 0.3,
+  scoreScale: 12,
 };
 
 // xorshift32 — seedable so tests and self-play are reproducible.
@@ -107,6 +112,8 @@ export function playoutMove(b) {
     tmp.length = 0;
     atariMovesNear(b, b.lastMove, tmp);
     atariMovesNear(b, b.lastMove2, tmp);
+    // Groups left in atari elsewhere still get to run (or be taken) sometimes.
+    if (!tmp.length && rand() < P.probGlobalAtari) atariMovesAll(b, tmp);
     const n = tmp.length / 2;
     if (n) {
       const s = randInt(n);
@@ -148,14 +155,15 @@ class Node {
     this.move = move;     // move that led here
     this.color = color;   // player who made it; stats are from their perspective
     this.children = null;
-    this.n = 0; this.w = 0;       // real visits / wins
+    this.n = 0; this.w = 0;       // real visits / wins (for display)
+    this.v = 0;                   // sum of rewards (win + score utility), drives selection
     this.pn = 0; this.pw = 0;     // prior pseudo-visits / wins
-    this.an = 0; this.aw = 0;     // AMAF visits / wins
+    this.an = 0; this.aw = 0;     // AMAF visits / rewards
     this.scoreSum = 0;            // sum of final scores (black - white - komi)
   }
   urgency(raveEquiv) {
     const v = this.n + this.pn;
-    const expectation = (this.w + this.pw) / v;
+    const expectation = (this.v + this.pw) / v;
     if (this.an === 0) return expectation;
     const beta = this.an / (this.an + v + v * this.an / raveEquiv);
     return beta * (this.aw / this.an) + (1 - beta) * expectation;
@@ -249,6 +257,20 @@ function expand(node, b, forbidden) {
   node.children = children;
 }
 
+// Most-visited replies below a node, while they are visited enough to mean something.
+function principalVariation(node, max = 8) {
+  const out = [];
+  let n = node;
+  while (n.children && out.length < max) {
+    let best = null;
+    for (const ch of n.children) if (!best || ch.n > best.n) best = ch;
+    if (!best || best.n < 6) break;
+    out.push(best.move);
+    n = best;
+  }
+  return out;
+}
+
 export class Search {
   // opts: { komi, forbidden(p) => bool for root superko, seed }
   constructor(board, opts = {}) {
@@ -307,15 +329,18 @@ export class Search {
       const owner = this.owner, os = this.ownerSum;
       for (let i = 0; i < os.length; i++) os[i] += owner[i];
 
+      const winB = winner === BLACK ? 1 : winner === 0 ? 0.5 : 0;
+      const uB = (1 - P.scoreWeight) * winB + P.scoreWeight * (0.5 + 0.5 * Math.tanh(score / P.scoreScale));
       for (let i = path.length - 1; i >= 0; i--) {
         const nd = path[i];
-        nd.w += winner === nd.color ? 1 : winner === 0 ? 0.5 : 0;
+        nd.w += nd.color === BLACK ? winB : 1 - winB;
+        nd.v += nd.color === BLACK ? uB : 1 - uB;
         nd.scoreSum += score;
         if (nd.children) {
           const toPlay = 3 - nd.color; // colour choosing among children
-          const win = winner === toPlay ? 1 : winner === 0 ? 0.5 : 0;
+          const u = toPlay === BLACK ? uB : 1 - uB;
           for (const ch of nd.children) {
-            if (ch.move !== PASS && amaf[ch.move] === toPlay) { ch.an++; ch.aw += win; }
+            if (ch.move !== PASS && amaf[ch.move] === toPlay) { ch.an++; ch.aw += u; }
           }
         }
       }
@@ -334,6 +359,7 @@ export class Search {
         winrate: ch.w / ch.n,
         score: ch.scoreSum / ch.n,  // black perspective
         prior: (ch.pw / ch.pn),
+        pv: principalVariation(ch),  // expected continuation after this move
       }))
       .sort((a, b) => b.visits - a.visits);
     return {
