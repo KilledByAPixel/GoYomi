@@ -64,16 +64,16 @@ export function shouldPass(game, results, aiColor) {
   const best = (results.allMoves || results.moves)[0];
   if (!best || best.move === PASS) return true;
   const own = results.ownership;
-  if (isSettled(board, own)) return true;
+  const count = game.score(estimateDead(board, own));
   if (board.lastMove === PASS && board.moveCount > 0) {
-    // Opponent passed: pass too if we'd win the count as the board stands.
-    // Also pass when the count as it stands already matches what the search
-    // expects at the end — nothing left to gain (covers dame and seki).
-    const s = game.score(estimateDead(board, own));
-    const winning = s.winner === aiColor;
-    if (winning && (isSettled(board, own, 0.5) || Math.abs(s.margin - results.score) < 2.5)) return true;
+    // Opponent passed: pass too if we win the count as the board stands and
+    // the search expects about the same result from playing on.
+    return count.winner === aiColor && Math.abs(count.margin - results.score) < 3;
   }
-  return false;
+  // Otherwise only when nothing is left to decide: no neutral points (dame or
+  // open borders) and every point's owner is very clear.
+  const closed = POINTS.every(p => count.owner[p] !== 0);
+  return closed && isSettled(board, own, 0.9);
 }
 
 // Winrate / score of the best move in a finished analysis, for the side to move.
@@ -145,8 +145,8 @@ export function explainMove(before, after, move, ownBefore, ownAfter) {
   const newLibs = chainLibsAfterMove(after, move);
   if (rescued.size) {
     const n = [...rescued].reduce((s, h) => s + before.size[h], 0);
-    out.push(newLibs >= 2 ? `Saves ${n} stone${n > 1 ? 's' : ''} that were in atari.` :
-      `Tries to save ${n} stone${n > 1 ? 's' : ''} in atari, but they are still in atari.`);
+    out.push(newLibs >= 2 ? `Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.` :
+      `Tries to save ${n === 1 ? 'a stone' : `${n} stones`} in atari, but ${n === 1 ? 'it is' : 'they are'} still in atari.`);
   }
 
   // Enemy chains now in atari (that weren't before).

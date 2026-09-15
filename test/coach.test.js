@@ -86,13 +86,28 @@ test('chooseMove: strong levels take the top move, weak ones sample', () => {
   assert.ok(!seen.has(PASS));
 });
 
-test('shouldPass when the board is settled', () => {
-  const g = new Game();
+test('shouldPass only when the board is settled, or after a pass when winning', () => {
+  // Black wall on column E, white wall on column F: every region is closed.
+  const setup = [];
+  for (let y = 0; y < 9; y++) setup.push([pt(4, y), BLACK], [pt(5, y), WHITE]);
+  const g = new Game({ setup });
   const settled = POINTS.map((p, i) => (i % 9) < 5 ? 1 : -1);
+  const move = { moves: [{ move: P('A1') }], ownership: settled, score: 2 };
   assert.equal(isSettled(g.board, settled), true);
-  assert.equal(shouldPass(g, { moves: [{ move: P('E5') }], ownership: settled, score: 2 }, WHITE), true);
-  const open = POINTS.map(() => 0);
-  assert.equal(shouldPass(g, { moves: [{ move: P('E5') }], ownership: open, score: 0 }, WHITE), false);
+  assert.equal(shouldPass(g, move, WHITE), true);
+  assert.equal(shouldPass(g, { ...move, ownership: POINTS.map(() => 0) }, WHITE), false);
+
+  // An open board is never "settled", even if the ownership guess is confident.
+  const empty = new Game();
+  assert.equal(shouldPass(empty, move, WHITE), false);
+
+  // After black passes: black is ahead by 2 on the count, so black would pass back, white wouldn't.
+  g.pass();
+  assert.equal(shouldPass(g, move, WHITE), false);
+  const h = new Game({ setup });
+  h.play(P('A1')); // black
+  h.pass();        // white passes; black to move and winning
+  assert.equal(shouldPass(h, move, BLACK), true);
 });
 
 test('threats lists groups in atari with their liberty', () => {

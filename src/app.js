@@ -28,7 +28,7 @@ const DEFAULTS = {
   komi: 7,
   handicap: 0,
   coach: true,
-  coachPlayouts: 16000,
+  coachPlayouts: 24000,
   sound: true,
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
@@ -586,6 +586,7 @@ function load() {
     if (!d) return false;
     settings = { ...structuredClone(DEFAULTS), ...d.settings, show: { ...DEFAULTS.show, ...(d.settings && d.settings.show) } };
     settings.level = Math.min(LEVELS.length - 1, Math.max(0, settings.level | 0));
+    if (![8000, 24000, 80000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     game = Game.fromSGF(d.sgf);
     let n = game.root;
     for (const i of d.path || []) { if (!n.children[i]) break; n = n.children[i]; }
