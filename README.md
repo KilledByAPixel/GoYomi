@@ -5,8 +5,11 @@ that grades and explains moves as you go. Built for learning.
 
 ```
 node serve.js 8115      # then open http://localhost:8115
-npm test                # rules, search, game record and coach tests
+npm test                # rules, search, game record, coach and ladder tests
 ```
+
+On Windows you can also double-click `start-go.bat`, which starts the server
+and opens the browser.
 
 No build step and no dependencies. ES modules plus Web Workers, which is why
 it needs the tiny static server rather than opening `index.html` from disk.
