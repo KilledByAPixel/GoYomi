@@ -7,9 +7,9 @@ import { ladderCapture, ladderThreat } from './ladder.js';
 // Each level beat the one below it clearly in self-play (tools/levels.js).
 export const LEVELS = [
   { name: 'Pebble', blurb: 'Plays almost at random. Practise capturing.', playouts: 50, temp: 1, blunder: 0.3 },
-  { name: 'Seedling', blurb: 'Grabs captures, wanders a lot.', playouts: 150, temp: 1, blunder: 0.18 },
+  { name: 'Seedling', blurb: 'Grabs captures, wanders a lot.', playouts: 220, temp: 1.2, blunder: 0.14 },
   { name: 'Sprout', blurb: 'Knows simple shapes, still misses plenty.', playouts: 400, temp: 1.5, blunder: 0.1 },
-  { name: 'Reed', blurb: 'Fights back, but leaves weaknesses.', playouts: 900, temp: 2, blunder: 0.06 },
+  { name: 'Reed', blurb: 'Fights back, but leaves weaknesses.', playouts: 650, temp: 1.8, blunder: 0.08 },
   { name: 'Stream', blurb: 'Casual player. Makes real mistakes.', playouts: 2000, temp: 3, blunder: 0.03 },
   { name: 'River', blurb: 'Solid fighting on a small board.', playouts: 5000, temp: 5, blunder: 0 },
   { name: 'Mountain', blurb: 'Strong. Punishes overplays.', playouts: 16000, temp: 0, blunder: 0 },
