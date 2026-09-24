@@ -25,4 +25,4 @@ http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(port, () => console.log(`Go Dojo on http://localhost:${port}`));
+}).listen(port, () => console.log(`GoYomi on http://localhost:${port}`));

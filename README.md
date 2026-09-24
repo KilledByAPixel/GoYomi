@@ -1,10 +1,12 @@
-# Go Dojo · 9×9
+# GoYomi · 9×9
 
 A friendly place to learn Go. Play 9×9 games against an AI that scales from
 "almost random" to genuinely strong, while a coach watches every move,
 grades it, explains what happened, and shows you what it would have played.
 
-![Go Dojo: a game in progress with the coach panel and game graph](screenshot.png)
+## ▶ [Play GoYomi in your browser](https://killedbyapixel.github.io/GoYomi/)
+
+![GoYomi: a game in progress with the coach panel and game graph](screenshot.png)
 
 ## Play at your level
 
@@ -126,8 +128,11 @@ variations, in the standard SGF format that any Go program can open, and
 | `Esc` | Clear hint and suggestion markers |
 | `L` `A` `T` `V` `G` `B` `N` | Toggle liberties, atari alerts, territory, move preview, grades, best moves, move numbers |
 
-## Running it
+## Running it yourself
 
-Go Dojo runs in your browser. On Windows, double-click `start-go.bat` and a
-tab opens ready to play. Otherwise run `npm start` in the project folder (it
-needs [Node.js](https://nodejs.org)) and open the address it prints.
+The easiest way to play is the link at the top. To run a copy locally on
+Windows, double-click `start-go.bat` and a tab opens ready to play. Otherwise
+run `npm start` in the project folder (it needs [Node.js](https://nodejs.org))
+and open the address it prints.
+
+© 2026 Frank Force. GoYomi is free and open source under the [GPL-3.0 license](LICENSE).

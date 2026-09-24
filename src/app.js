@@ -1,4 +1,4 @@
-// Go Dojo controller: wires the game record, the opponent engine, the coach
+// GoYomi controller: wires the game record, the opponent engine, the coach
 // engine and the board view together.
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
@@ -11,7 +11,8 @@ import { stoneSound } from './sound.js';
 
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const STORE = 'goDojo.v1';
+const STORE = 'goYomi.v1';
+const OLD_STORE = 'goDojo.v1'; // autosaves from before the rename
 
 const TOGGLES = [
   ['liberties', 'Liberties', 'Number of liberties (empty neighbours) of each group. 1 means atari.', 'L'],
@@ -697,7 +698,7 @@ function save() {
 
 function load() {
   try {
-    const d = JSON.parse(localStorage.getItem(STORE));
+    const d = JSON.parse(localStorage.getItem(STORE) || localStorage.getItem(OLD_STORE));
     if (!d) return false;
     settings = { ...structuredClone(DEFAULTS), ...d.settings, show: { ...DEFAULTS.show, ...(d.settings && d.settings.show) } };
     settings.level = Math.min(LEVELS.length - 1, Math.max(0, settings.level | 0));
@@ -718,13 +719,13 @@ function load() {
 }
 
 function exportSGF() {
-  const name = c => !settings.human ? colorName(c) : c === settings.human ? 'Human' : `GoDojo ${level().name}`;
+  const name = c => !settings.human ? colorName(c) : c === settings.human ? 'Human' : `GoYomi ${level().name}`;
   const result = resigned ? `${resigned === BLACK ? 'W' : 'B'}+R`
     : scoring && !scoring.pending ? game.score(scoring.dead, scoring.node).text.replace('Draw (jigo)', '0') : '';
   const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/x-go-sgf' }));
-  a.download = `go-dojo-${new Date().toISOString().slice(0, 10)}.sgf`;
+  a.download = `goyomi-${new Date().toISOString().slice(0, 10)}.sgf`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

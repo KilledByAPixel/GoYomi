@@ -1,5 +1,6 @@
 {
-  "name": "go-dojo",
+  "name": "goyomi",
+  "license": "GPL-3.0-only",
   "version": "0.1.0",
   "description": "9x9 Go vs a Monte-Carlo AI, with a coach that visualises and explains as you play.",
   "type": "module",

@@ -155,7 +155,7 @@ export class Game {
   toSGF({ black = 'Black', white = 'White', result = '' } = {}) {
     const coord = p => p === PASS ? '' : String.fromCharCode(97 + ptX(p)) + String.fromCharCode(97 + ptY(p));
     const esc = s => s.replace(/\\/g, '\\\\').replace(/]/g, '\\]');
-    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoDojo]SZ[${N}]KM[${this.komi}]RU[Chinese]PB[${esc(black)}]PW[${esc(white)}]`;
+    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoYomi]SZ[${N}]KM[${this.komi}]RU[Chinese]PB[${esc(black)}]PW[${esc(white)}]`;
     if (this.handicap) s += `HA[${this.handicap}]`;
     if (result) s += `RE[${result}]`;
     const ab = this.setup.filter(([, c]) => c === BLACK), aw = this.setup.filter(([, c]) => c === WHITE);
