@@ -60,9 +60,9 @@ const aiColor = () => settings.human ? 3 - settings.human : 0;
 const level = () => LEVELS[settings.level];
 const aiLabel = () => `AI (${level().name})`;
 const who = c => !settings.human ? colorName(c) : c === settings.human ? 'You' : 'AI';
-const whose = c => !settings.human ? colorName(c) : c === settings.human ? 'Your' : 'AI\'s';
+const whose = c => !settings.human ? `${colorName(c)}'s` : c === settings.human ? 'Your' : 'AI\'s';
 const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
-const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const plural = (n, w) => `${n} ${n === 1 ? w : w.replace(/y$/, 'ie') + 's'}`;
 
 function isAITurn(node = game.current) {
   const ai = aiColor();
@@ -176,10 +176,10 @@ async function toggleThreat() {
   const recipe = game.recipe(node);
   recipe.moves = [...recipe.moves, [PASS, me]];
   recipe.resetPasses = true; // the imagined pass must not end the game after a real pass
-  threat = { node, pending: true };
+  const mine = threat = { node, pending: true };
   render();
   const res = await scout.search(recipe, { playouts: 8000, reportMs: 0 });
-  if (!threat || threat.node !== node) return;
+  if (threat !== mine) return; // cleared with Esc, or superseded by a newer request
   const m = res && res.moves.find(x => x.move !== PASS);
   if (!m) { threat = res ? { node, none: true } : null; render(); return; }
   const passed = node.board.clone();
@@ -298,6 +298,12 @@ async function enterScoring() {
   mode = 'score';
   scoring = { node, dead: new Set(), pending: true };
   render();
+  if (node.scoredDead) { // counted before: keep the player's dead/alive corrections
+    scoring.dead = new Set(node.scoredDead);
+    scoring.pending = false;
+    render();
+    return;
+  }
   let an = node.analysisDone ? node.analysis : null;
   if (!an) {
     coach.cancel();
@@ -307,8 +313,10 @@ async function enterScoring() {
   }
   if (!scoring || scoring.node !== node) return;
   scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
+  node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
   render();
+  $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
   scheduleCoach();
 }
 
@@ -320,6 +328,7 @@ function toggleDead(p) {
   if (b.color[p] !== BLACK && b.color[p] !== WHITE) return;
   const on = !scoring.dead.has(p);
   for (const s of b.chainStones(p)) on ? scoring.dead.add(s) : scoring.dead.delete(s);
+  scoring.node.scoredDead = new Set(scoring.dead);
   render();
 }
 
@@ -356,7 +365,8 @@ function showBetter(node) {
   goTo(parent);
   const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
   better = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
-  flash(`Coach's choice: ${ptName(g.bestMove)}. Numbered stones show how it expects play to go on. Click to try it, or ▶ to go back.`);
+  const canClick = !aiColor() || resigned || parent.board.toPlay !== aiColor();
+  flash(`Coach's choice: ${ptName(g.bestMove)}. Numbered stones show how it expects play to go on. ${canClick ? 'Click to try it' : `Press "Try ${ptName(g.bestMove)} instead" to play it`}, or ▶ to go back.`);
   render();
 }
 
@@ -516,7 +526,7 @@ function renderCoach() {
     else {
       const oppName = !settings.human ? colorName(threat.opp) : threat.opp === settings.human ? 'you' : 'the AI';
       tb.innerHTML = `<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
-        (threat.cost >= 1 ? ` Ignoring it costs about <b>${threat.cost.toFixed(0)} points</b>.` : '') + '</p>' +
+        (threat.cost >= 1 ? ` Ignoring it costs about <b>${plural(Math.round(threat.cost), 'point')}</b>.` : '') + '</p>' +
         `<ul class="explain">${threat.explain.map(t => `<li>${t}</li>`).join('')}</ul>` +
         '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>';
     }
@@ -541,7 +551,7 @@ function renderReview() {
     const s = stats[c];
     if (!s.n) return '';
     const pills = ['blunder', 'mistake', 'inaccuracy'].filter(k => s[k])
-      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${s[k]} ${GRADES[k].label.toLowerCase()}${s[k] > 1 ? 's' : ''}</span>`).join(' ');
+      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${plural(s[k], GRADES[k].label.toLowerCase())}</span>`).join(' ');
     return `<div class="rv-row"><span class="stone-icon ${c === BLACK ? 'black' : 'white'}"></span><b>${who(c)}</b>` +
       `<span class="muted">avg −${(s.loss / s.n).toFixed(1)} pts/move</span>${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
   };
@@ -671,7 +681,7 @@ function renderStatus() {
   else if (!settings.human) text = `${colorName(node.board.toPlay)} to play.`;
   else if (node.board.toPlay === settings.human) text = `Your move (${colorName(settings.human)}).`;
   else text = 'Viewing an earlier position. It\'s the AI\'s turn here: press "AI move", or ▶ to step forward.';
-  el.textContent = text;
+  if (el.textContent !== text) el.textContent = text; // aria-live: don't re-announce on every hover
   el.className = `message ${kind}`;
 }
 
@@ -692,6 +702,9 @@ function load() {
     settings = { ...structuredClone(DEFAULTS), ...d.settings, show: { ...DEFAULTS.show, ...(d.settings && d.settings.show) } };
     settings.level = Math.min(LEVELS.length - 1, Math.max(0, settings.level | 0));
     if (![8000, 24000, 80000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
+    if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
+    if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
+    if (!Number.isFinite(settings.komi)) settings.komi = DEFAULTS.komi;
     game = Game.fromSGF(d.sgf);
     let n = game.root;
     for (const i of d.path || []) { if (!n.children[i]) break; n = n.children[i]; }
@@ -706,7 +719,9 @@ function load() {
 
 function exportSGF() {
   const name = c => !settings.human ? colorName(c) : c === settings.human ? 'Human' : `GoDojo ${level().name}`;
-  const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result: resigned ? `${resigned === BLACK ? 'W' : 'B'}+R` : '' });
+  const result = resigned ? `${resigned === BLACK ? 'W' : 'B'}+R`
+    : scoring && !scoring.pending ? game.score(scoring.dead, scoring.node).text.replace('Draw (jigo)', '0') : '';
+  const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/x-go-sgf' }));
   a.download = `go-dojo-${new Date().toISOString().slice(0, 10)}.sgf`;
@@ -737,6 +752,7 @@ function openNewGame() {
   f.elements.level.value = String(settings.level);
   f.elements.handicap.value = String(settings.handicap);
   f.elements.komi.value = String(settings.komi);
+  dlg.returnValue = ''; // Esc keeps the previous returnValue, which would re-run newGame()
   dlg.showModal();
 }
 
@@ -809,7 +825,11 @@ function setupControls() {
   const toggleKey = { l: 'liberties', a: 'atari', t: 'territory', v: 'preview', g: 'feedback', b: 'best', n: 'numbers' };
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.target instanceof Element && e.target.closest('input, select, textarea, dialog')) return;
+    if (e.target instanceof Element) {
+      // Leave typing alone, but a focused toggle or select must not swallow the game shortcuts.
+      if (e.target.closest('textarea, dialog, input:not([type=checkbox]):not([type=radio])')) return;
+      if (e.target.closest('select') && /^(Arrow|Home|End|Enter| )/.test(e.key)) return;
+    }
     const k = e.key.toLowerCase();
     if (e.key === 'ArrowLeft') nav('prev');
     else if (e.key === 'ArrowRight') nav('next');
@@ -819,7 +839,7 @@ function setupControls() {
     else if (k === 'h') $('#btnHint').click();
     else if (k === 'o') toggleThreat();
     else if (k === 'p') humanPass();
-    else if (e.key === 'Escape') { better = null; hintOn = false; threat = null; render(); }
+    else if (e.key === 'Escape') { better = null; hintOn = false; threat = null; scout.cancel(); render(); }
     else if (toggleKey[k]) {
       const key = toggleKey[k] === 'best' ? 'hints' : toggleKey[k];
       settings.show[key] = !settings.show[key];

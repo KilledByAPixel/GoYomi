@@ -43,6 +43,7 @@ function defenderLoses(b, p, depth, seq) {
   if (depth <= 0) return false;
   for (const e of b.adjacentEnemyChains(h)) if (b.inAtari(e)) return false;
   const lib = b.atariLib(h);
+  if (lib === b.ko) return false; // the defender can fight the ko: not a clean capture
   if (!b.isLegal(lib)) return true;
   const c = b.clone();
   c.play(lib);

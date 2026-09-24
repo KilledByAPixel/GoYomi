@@ -27,7 +27,7 @@ export function chooseMove(results, level, rand = Math.random) {
   if (level.blunder && rand() < level.blunder && moves.length > 3) {
     // An honest beginner blunder: any move the search looked at a little.
     const pool = moves.filter(m => m.visits >= 2);
-    return pool[(rand() * pool.length) | 0].move;
+    if (pool.length) return pool[(rand() * pool.length) | 0].move;
   }
   if (!level.temp) return top.move;
   // Sample proportional to visits^temp among reasonable candidates.
@@ -185,7 +185,7 @@ export function explainMove(before, after, move, ownBefore, ownAfter) {
     if (before.color[q] === o) enemyHeads.add(before.head[q]);
   }
   if (friendHeads.size >= 2) out.push(`Connects ${friendHeads.size} groups into one.`);
-  if (enemyHeads.size >= 2 && !captured.length) out.push('Keeps two enemy groups apart (a cut).');
+  if (enemyHeads.size >= 2 && !captured.length && newLibs >= 2) out.push(`Keeps ${enemyHeads.size === 2 ? 'two' : enemyHeads.size} enemy groups apart (a cut).`);
 
   if (newLibs === 1 && !captured.length) out.push(`Careful: this ${after.size[after.head[move]] > 1 ? 'group' : 'stone'} is now in atari — it can be captured.`);
   else if (newLibs === 2 && after.size[after.head[move]] >= 3 && !rescued.size) out.push('The group has only 2 liberties — watch out for atari.');

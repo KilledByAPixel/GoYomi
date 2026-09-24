@@ -3,6 +3,9 @@
 let ctx = null;
 
 function audio() {
+  // Browsers only let audio start from a user gesture. If the AI moves first, the
+  // context stays suspended: skip that sound instead of queueing it for later.
+  if (!ctx && navigator.userActivation && !navigator.userActivation.hasBeenActive) return null;
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
@@ -34,7 +37,9 @@ function click(a, t, gain, freq) {
 
 export function stoneSound(captures = 0) {
   try {
-    const a = audio(), t = a.currentTime + 0.005;
+    const a = audio();
+    if (!a) return;
+    const t = a.currentTime + 0.005;
     click(a, t, 0.9, 1900);
     for (let i = 0; i < Math.min(captures, 6); i++) click(a, t + 0.12 + i * 0.05 + Math.random() * 0.02, 0.35, 2600 + Math.random() * 900);
   } catch { /* audio unavailable */ }

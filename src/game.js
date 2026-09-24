@@ -161,6 +161,7 @@ export class Game {
     const ab = this.setup.filter(([, c]) => c === BLACK), aw = this.setup.filter(([, c]) => c === WHITE);
     if (ab.length) s += 'AB' + ab.map(([p]) => `[${coord(p)}]`).join('');
     if (aw.length) s += 'AW' + aw.map(([p]) => `[${coord(p)}]`).join('');
+    if (this.setup.length) s += `PL[${this.root.board.toPlay === WHITE ? 'W' : 'B'}]`;
     if (this.root.comment) s += `C[${esc(this.root.comment)}]`;
     const walk = node => {
       let out = '';
@@ -187,7 +188,7 @@ export class Game {
       ws();
       while (i < text.length && /[A-Za-z]/.test(text[i])) {
         let id = '';
-        while (/[A-Za-z]/.test(text[i])) { if (text[i] === text[i].toUpperCase()) id += text[i]; i++; }
+        while (i < text.length && /[A-Za-z]/.test(text[i])) { if (text[i] === text[i].toUpperCase()) id += text[i]; i++; }
         const vals = [];
         ws();
         while (text[i] === '[') {
@@ -220,22 +221,25 @@ export class Game {
     i = start;
     const tree = parseTree();
     const rootProps = tree.seq[0] || {};
-    if (rootProps.SZ && +rootProps.SZ[0] !== N) throw new Error(`Only ${N}x${N} games are supported`);
+    const sz = rootProps.SZ ? parseInt(rootProps.SZ[0], 10) : 19; // SGF's default size is 19
+    if (sz !== N) throw new Error(`that is a ${sz}x${sz} game; only ${N}x${N} is supported`);
     const toPt = v => {
       if (!v || v === 'tt') return PASS;
-      return pt(v.charCodeAt(0) - 97, v.charCodeAt(1) - 97);
+      const x = v.charCodeAt(0) - 97, y = v.charCodeAt(1) - 97;
+      if (v.length !== 2 || x < 0 || x >= N || y < 0 || y >= N) throw new Error(`coordinate "${v}" is outside a ${N}x${N} board`);
+      return pt(x, y);
     };
     const setup = [];
     for (const v of rootProps.AB || []) setup.push([toPt(v), BLACK]);
     for (const v of rootProps.AW || []) setup.push([toPt(v), WHITE]);
-    const komi = rootProps.KM ? parseFloat(rootProps.KM[0]) : 7;
-    const handicap = rootProps.HA ? +rootProps.HA[0] : 0;
+    const km = parseFloat(((rootProps.KM || [])[0] || '').replace(',', '.'));
+    const komi = Number.isFinite(km) ? km : 7;
+    const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
     const game = new Game({ komi, setup: setup.length ? setup : [] });
     game.handicap = handicap;
-    if (setup.length && !(rootProps.PL && rootProps.PL[0] === 'B')) {
-      // Handicap-style setup: white moves first unless the first move says otherwise.
-      game.root.board.toPlay = WHITE;
-    }
+    const pl = rootProps.PL && rootProps.PL[0].toUpperCase();
+    if (pl === 'W' || pl === 'B') game.root.board.toPlay = pl === 'W' ? WHITE : BLACK;
+    else if (handicap && setup.length) game.root.board.toPlay = WHITE; // handicap: White moves first
     if (rootProps.C) game.root.comment = rootProps.C[0];
     const apply = (seq, from) => {
       let node = from;
