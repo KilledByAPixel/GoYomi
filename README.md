@@ -6,7 +6,7 @@ grades it, explains what happened, and shows you what it would have played.
 
 ## ▶ [Play GoYomi in your browser](https://killedbyapixel.github.io/GoYomi/)
 
-![GoYomi: a game in progress with the coach panel and game graph](screenshot.png)
+![GoYomi: a game in progress with the coach panel and game graph](social.png)
 
 ## Play at your level
 

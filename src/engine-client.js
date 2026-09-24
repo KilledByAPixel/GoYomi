@@ -9,7 +9,14 @@ export class Engine {
     this.nextId = 1;
     this.pending = null;
     this.worker.onmessage = e => this.onMessage(e.data);
-    this.worker.onerror = e => console.error(`${name} worker error`, e.message);
+    this.worker.onerror = e => {
+      console.error(`${name} worker error`, e.message);
+      // Fail the running search instead of leaving the caller waiting forever.
+      const job = this.pending;
+      this.pending = null;
+      if (job) job.resolve(null);
+      if (Engine.onError) Engine.onError(name, e.message || 'failed to load');
+    };
   }
 
   search(position, { playouts = 10000, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {

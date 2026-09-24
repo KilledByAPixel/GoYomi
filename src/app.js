@@ -53,6 +53,7 @@ const opponent = new Engine('opponent');
 const coach = new EnginePool('coach', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2)));
 // Answers "what would the opponent play if I passed?"
 const scout = new Engine('scout');
+Engine.onError = (name, msg) => flash(`The ${name} engine stopped working (${msg}). Reload the page; if it keeps happening, try a current Chrome, Firefox or Safari.`, 'bad');
 const view = new BoardView($('#board'), { onClick, onHover });
 
 // ------------------------------------------------------------------ helpers
