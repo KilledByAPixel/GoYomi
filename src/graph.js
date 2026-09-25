@@ -12,7 +12,7 @@ export function renderGraph(el, line, current, onPick) {
   let penWr = false, penSc = false;
   line.forEach((node, i) => {
     const an = node.analysis;
-    if (!an) { penWr = penSc = false; return; }
+    if (!an) return; // not read yet (e.g. interrupted by a take-back): draw straight through, it fills in later
     wr += `${penWr ? 'L' : 'M'}${x(i).toFixed(1)} ${yWr(an.blackWinrate).toFixed(1)} `;
     sc += `${penSc ? 'L' : 'M'}${x(i).toFixed(1)} ${yScore(an.score).toFixed(1)} `;
     penWr = penSc = true;
