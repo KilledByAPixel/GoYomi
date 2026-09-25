@@ -7,7 +7,7 @@ import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, GRADES, explai
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
-import { stoneSound, playSound, setSoundEnabled, SOUNDS } from './sound.js';
+import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -875,7 +875,7 @@ window.dojo = {
   play: name => onClick(POINTS.find(p => ptName(p) === name.toUpperCase())),
   pass: humanPass,
   takeBack,
-  // Sound tweaking: dojo.sounds.stone = [...]; dojo.playSound('stone')
-  sounds: SOUNDS, playSound,
+  // Sound tweaking: dojo.sounds.stone = new dojo.ZZFXSound([...]); dojo.playSound('stone')
+  sounds: SOUNDS, playSound, ZZFXSound,
   newGame: (opts = {}) => { Object.assign(settings, opts); syncOptions(); newGame(); },
 };
