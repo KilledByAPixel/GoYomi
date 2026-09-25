@@ -107,7 +107,7 @@ function playMove(move) {
   const node = game.play(move);
   if (!node.explain) node.explain = explainMove(parent.board, node.board, move);
   hintOn = false; better = null;
-  if (move === PASS) playSound('pass'); else stoneSound(node.captured.length);
+  if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   tryGrade(node);
   if (game.isOver()) { save(); enterScoring(); return true; }
   afterChange();

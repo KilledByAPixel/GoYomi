@@ -25,6 +25,8 @@ export const SOUNDS = {
 // Delay between rattles when several stones are captured at once.
 const CAPTURE_STAGGER_MS = 45;
 const CAPTURE_MAX = 6;
+// The opponent's stones play slightly lower so you can hear whose move it was.
+const OPPONENT_PITCH = 0.85;
 
 let enabled = true;
 export function setSoundEnabled(on) { enabled = !!on; }
@@ -39,18 +41,19 @@ function ready() {
   return true;
 }
 
-// Play a named effect from SOUNDS.
-export function playSound(name) {
+// Play a named effect from SOUNDS, optionally pitch-shifted (1 = as designed).
+export function playSound(name, pitch = 1) {
   const sound = SOUNDS[name];
   if (!sound || !ready()) return;
-  try { sound.play(); } catch { /* audio unavailable */ }
+  try { sound.play(1, pitch); } catch { /* audio unavailable */ }
 }
 
 // A stone goes down; captured stones rattle off after it.
-export function stoneSound(captures = 0) {
-  playSound('stone');
+export function stoneSound(captures = 0, opponent = false) {
+  const pitch = opponent ? OPPONENT_PITCH : 1;
+  playSound('stone', pitch);
   for (let i = 0; i < Math.min(captures, CAPTURE_MAX); i++) {
-    setTimeout(() => playSound('capture'), 120 + i * CAPTURE_STAGGER_MS);
+    setTimeout(() => playSound('capture', pitch), 120 + i * CAPTURE_STAGGER_MS);
   }
 }
 
