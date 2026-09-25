@@ -26,7 +26,7 @@ export const SOUNDS = {
 const CAPTURE_STAGGER_MS = 45;
 const CAPTURE_MAX = 6;
 // The opponent's stones play slightly lower so you can hear whose move it was.
-const OPPONENT_PITCH = 0.85;
+const OPPONENT_PITCH = 1.2;
 
 let enabled = true;
 export function setSoundEnabled(on) { enabled = !!on; }
