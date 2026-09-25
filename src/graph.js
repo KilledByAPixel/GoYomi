@@ -31,8 +31,7 @@ export function renderGraph(el, line, current, onPick) {
   <path d="${sc}" class="g-score" vector-effect="non-scaling-stroke"/>
   <path d="${wr}" class="g-wr" vector-effect="non-scaling-stroke"/>
   ${dots}
-</svg>
-<span class="g-lbl g-lbl-b">Black ahead</span><span class="g-lbl g-lbl-w">White ahead</span>`;
+</svg>`;
   el.onclick = e => {
     const r = el.getBoundingClientRect();
     const i = Math.round(((e.clientX - r.left) / r.width * W - PAD) / (W - 2 * PAD) * n);
