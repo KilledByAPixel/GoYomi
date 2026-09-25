@@ -3,7 +3,7 @@
 // Every effect is one entry in SOUNDS below. To tweak one, design it at
 // https://killedbyapixel.github.io/ZzFX/ and paste the array here. You can also
 // live-edit from the console:  dojo.sounds.stone = [...]; dojo.play('stone')
-import { zzfx, ZZFX } from './zzfx.js';
+import { ZZFX, ZZFXSound } from './zzfx.js';
 
 export const SOUNDS = {
   // A stone placed on the board: short woody click.
@@ -39,11 +39,26 @@ function ready() {
   return true;
 }
 
+// Samples are synthesised once per effect and cached; ZZFXSound applies the
+// randomness parameter as a small playback-rate wobble at play time. Replacing
+// an array in SOUNDS (e.g. from the console) rebuilds that effect on next play.
+const cache = new Map(); // name -> { params, sound }
+function cached(name) {
+  const params = SOUNDS[name];
+  if (!params) return null;
+  let entry = cache.get(name);
+  if (!entry || entry.params !== params) {
+    entry = { params, sound: new ZZFXSound([...params]) }; // copy: the constructor zeroes randomness in the array it gets
+    cache.set(name, entry);
+  }
+  return entry.sound;
+}
+
 // Play a named effect from SOUNDS.
 export function playSound(name) {
-  const params = SOUNDS[name];
-  if (!params || !ready()) return;
-  try { zzfx(...params); } catch { /* audio unavailable */ }
+  const sound = cached(name);
+  if (!sound || !ready()) return;
+  try { sound.play(); } catch { /* audio unavailable */ }
 }
 
 // A stone goes down; captured stones rattle off after it.
