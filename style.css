@@ -163,10 +163,14 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 .rv-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rv-row .pill { font-size: 11px; padding: 1px 7px; }
 .rv-worst { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-.graph { height: 110px; cursor: pointer; }
+.graph { height: 110px; cursor: pointer; position: relative; }
 .graph-svg { width: 100%; height: 100%; display: block; border-radius: 6px; }
-.g-black { fill: #2d2a26; opacity: .1; }
-.g-white { fill: #fff; opacity: .5; }
+/* Upper half is Black's side of 50%, lower half is White's; tinted to match. */
+.g-black { fill: #2d2a26; opacity: .12; }
+.g-white { fill: #fff; opacity: .6; }
+.g-lbl { position: absolute; left: 8px; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); pointer-events: none; }
+.g-lbl-b { top: 4px; }
+.g-lbl-w { bottom: 4px; }
 .g-mid { stroke: var(--muted); stroke-dasharray: 4 4; opacity: .5; }
 .g-cur { stroke: var(--accent); stroke-width: 2; }
 .g-wr { fill: none; stroke: var(--ink); stroke-width: 2; }
