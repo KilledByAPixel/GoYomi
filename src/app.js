@@ -7,7 +7,7 @@ import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, GRADES, explai
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
-import { stoneSound } from './sound.js';
+import { stoneSound, playSound, setSoundEnabled, SOUNDS } from './sound.js';
 
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -103,11 +103,11 @@ function afterChange() {
 function playMove(move) {
   const parent = game.current;
   const r = game.check(move);
-  if (!r.ok) { flash(reasonText(r.reason), 'bad'); return false; }
+  if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   const node = game.play(move);
   if (!node.explain) node.explain = explainMove(parent.board, node.board, move);
   hintOn = false; better = null;
-  if (settings.sound && move !== PASS) stoneSound(node.captured.length);
+  if (move === PASS) playSound('pass'); else stoneSound(node.captured.length);
   tryGrade(node);
   if (game.isOver()) { save(); enterScoring(); return true; }
   afterChange();
@@ -148,6 +148,7 @@ function takeBack() {
   cancelAI();
   better = null; hintOn = false;
   if (!game.current.parent) return;
+  playSound('undo');
   game.undo();
   const ai = aiColor();
   if (ai && !resigned) while (game.current.parent && game.toPlay === ai) game.undo();
@@ -165,6 +166,7 @@ function resignOrScore() {
   if (resigned) return;
   cancelAI();
   resigned = settings.human;
+  playSound('lose');
   flash('You resigned. No shame in that — step back through the game to see where it turned.');
   afterChange();
 }
@@ -317,6 +319,7 @@ async function enterScoring() {
   scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
   node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
+  playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
   render();
   $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
   scheduleCoach();
@@ -802,7 +805,7 @@ function setupControls() {
     coach.cancel(); coachNode = null;
     save(); scheduleCoach();
   };
-  $('#optSound').onchange = e => { settings.sound = e.target.checked; save(); };
+  $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
 
   $('#btnPass').onclick = humanPass;
   $('#btnUndo').onclick = takeBack;
@@ -856,6 +859,7 @@ function setupControls() {
 setupControls();
 setupDialog();
 if (!load()) game = new Game({ komi: settings.komi, handicap: settings.handicap });
+setSoundEnabled(settings.sound);
 syncOptions();
 afterChange();
 
@@ -871,5 +875,7 @@ window.dojo = {
   play: name => onClick(POINTS.find(p => ptName(p) === name.toUpperCase())),
   pass: humanPass,
   takeBack,
+  // Sound tweaking: dojo.sounds.stone = [...]; dojo.playSound('stone')
+  sounds: SOUNDS, playSound,
   newGame: (opts = {}) => { Object.assign(settings, opts); syncOptions(); newGame(); },
 };
