@@ -7,19 +7,19 @@ import { ZZFX, ZZFXSound } from './zzfx.js';
 
 export const SOUNDS = {
   // A stone placed on the board: short woody click.
-  stone:   [1.2, .1, 1900, , .01, .04, 4, 1.4, , , , , , , , , , .7, .01, , 3000],
+  stone:   [,.2,,,,.03,4,1.4,,,,,,,,,,,,,3e3],
   // One captured stone rattling off the board; played once per stone, staggered.
-  capture: [.6, .3, 2800, , .005, .03, 4, 1.5, , , , , , , , , , .6, .01, , 4000],
+  capture: [.7,.3,2800,,.01,.01,4,1.5,,,,,,,,,,.6,,,5e3],
   // Someone passed: soft low tone.
-  pass:    [.5, , 330, .01, .06, .12, 0, 1.2, , , , , , , , , , .7, .04],
+  pass:    [,,440,,.05,,,,,,440,.05,,,,,.1],
   // Illegal move (ko, suicide, occupied): short dull buzz.
-  illegal: [.4, , 140, , .04, .08, 2, 1.5, , , , , , , , , , .6, .02],
+  illegal: [.8,.3,340,.01,,.02,,.8,-10,,,,,1,,,,.5,.02],
   // Take back: quick falling blip.
-  undo:    [.4, , 520, , .03, .08, 1, 1.2, -6],
+  undo:    [.5,,660,,,,1,,20],
   // Game over, you won: rising three-note chime.
-  win:     [.6, , 440, .02, .12, .3, 0, 1.6, , , 200, .1, .12],
+  win:     [,,,.01,,.9,,2,,-40,40,,.1],
   // Game over, you lost (or a draw): gentle falling tone.
-  lose:    [.5, , 330, .02, .15, .35, 0, 1.5, -2, , , , , , , , , .8, .1],
+  lose:    [,,520,.01,,.9,,2,,40,-40,,.1],
 };
 
 // Delay between rattles when several stones are captured at once.
