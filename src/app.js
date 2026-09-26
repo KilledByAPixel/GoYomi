@@ -203,18 +203,23 @@ function cancelAI() {
   if (aiNode) { opponent.cancel(); aiNode = null; }
 }
 
-async function aiMove(force = false) {
+// force: play even when it isn't the AI's turn (the "AI move" button, replays).
+// best: play the coach's best move at full strength instead of the level's
+// sampled move, reusing the coach's reading of this position when it has one.
+async function aiMove(force = false, best = false) {
   const node = game.current;
   if (aiNode || mode !== 'play' || game.isOver(node)) return;
   if (!force && !isAITurn(node)) return;
   const token = ++aiToken;
   const color = node.board.toPlay;
-  const lv = level();
+  const lv = best ? { playouts: settings.coachPlayouts, temp: 0, blunder: 0 } : level();
   aiNode = node;
   render();
   const t0 = performance.now();
-  let results = await opponent.search(game.recipe(node), { playouts: lv.playouts, maxTime: 15000, reportMs: 0 });
+  let results = best && node.analysisDone ? node.analysis
+    : await opponent.search(game.recipe(node), { playouts: lv.playouts, maxTime: 15000, reportMs: 0 });
   if (token !== aiToken) return;
+  if (best && results && !node.analysisDone) { node.analysis = results; node.analysisDone = true; tryGrade(node); }
   // When the human has passed, decide about passing with a deeper look.
   let passInfo = results;
   if (results && node.board.lastMove === PASS && node.parent) {
@@ -233,7 +238,8 @@ async function aiMove(force = false) {
     move = (results.allMoves || results.moves).map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
   }
   if (move === PASS) {
-    flash(node.board.lastMove === PASS ? `${aiLabel()} passes too.` : `${aiLabel()} passes. If you think the game is finished, pass as well.`);
+    const who = best ? 'The coach' : aiLabel();
+    flash(node.board.lastMove === PASS ? `${who} passes too.` : `${who} passes. If you think the game is finished, pass as well.`);
   }
   playMove(move);
 }
@@ -814,7 +820,7 @@ function setupControls() {
     if (hintOn && !game.current.analysis) flash('The coach is still reading this position…');
     render();
   };
-  $('#btnAI').onclick = () => aiMove(true);
+  $('#btnAI').onclick = () => aiMove(true, true);
   $('#btnThreat').onclick = toggleThreat;
   $('#btnResign').onclick = resignOrScore;
   $('#btnNew').onclick = openNewGame;
