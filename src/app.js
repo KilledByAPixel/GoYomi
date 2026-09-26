@@ -45,6 +45,7 @@ let hintOn = false;
 let better = null;           // { node, move, pv } — coach move shown on node's board
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
+let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
 let coachNode = null;
 let threat = null;           // { node, pending | none | move, pv, explain, cost } — opponent's idea
 
@@ -213,7 +214,7 @@ async function aiMove(force = false, best = false) {
   const token = ++aiToken;
   const color = node.board.toPlay;
   const lv = best ? { playouts: settings.coachPlayouts, temp: 0, blunder: 0 } : level();
-  aiNode = node;
+  aiNode = node; aiBest = best;
   render();
   const t0 = performance.now();
   let results = best && node.analysisDone ? node.analysis
@@ -686,7 +687,7 @@ function renderStatus() {
   if (h && !h.ok) { text = reasonText(h.reason); kind = 'bad'; }
   else if (flashMsg) { text = flashMsg.text; kind = flashMsg.kind; }
   else if (scoring) text = scoring.pending ? 'Counting…' : 'Click groups to mark them dead or alive.';
-  else if (aiNode) text = `${aiLabel()} is thinking…`;
+  else if (aiNode) text = aiBest ? 'Finding the best move…' : `${aiLabel()} is thinking…`;
   else if (resigned) text = `${colorName(resigned)} resigned.`;
   else if (game.isOver(node)) text = 'Both players passed. The game is over.';
   else if (!settings.human) text = `${colorName(node.board.toPlay)} to play.`;
