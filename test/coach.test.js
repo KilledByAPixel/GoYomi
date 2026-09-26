@@ -3,8 +3,35 @@ import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
 import { estimateDead, gradeMove, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
+
+test('a stray stone inside enclosed territory is dead once the position is played out', () => {
+  const rows = [
+    '.........',
+    '.O..X....',
+    '....X....',
+    '....X....',
+    'XXXXX....',
+    '.........',
+    '.........',
+    '.........',
+    '.........',
+  ];
+  seed(5);
+  // Two passes on record: playouts stop at once and the stone is judged alive.
+  const finished = Board.fromRows(rows, BLACK);
+  finished.passes = 2;
+  const s1 = new Search(finished, { komi: 7 });
+  s1.run(500);
+  assert.ok(!estimateDead(finished, s1.results(1).ownership).has(P('B8')), 'sanity: no playouts, no capture');
+  // Pass counter reset (what Game.recipe requests for finished games): dead.
+  const playedOut = Board.fromRows(rows, BLACK);
+  const s2 = new Search(playedOut, { komi: 7 });
+  s2.run(2000);
+  assert.ok(estimateDead(playedOut, s2.results(1).ownership).has(P('B8')));
+});
 
 test('estimateDead marks whole chains owned by the opponent', () => {
   const b = Board.fromRows([

@@ -147,7 +147,11 @@ export class Game {
   recipe(node = this.current) {
     const moves = [];
     for (let n = node; n.parent; n = n.parent) moves.unshift([n.move, n.color]);
-    return { setup: this.setup, whiteFirst: this.root.board.toPlay === WHITE, moves, komi: this.komi };
+    // After two passes the board counts as finished, and playouts from it would
+    // end at once (nothing gets captured, so no stone ever looks dead). Reset
+    // the pass counter so a search from a finished position plays it out.
+    return { setup: this.setup, whiteFirst: this.root.board.toPlay === WHITE, moves, komi: this.komi,
+      resetPasses: node.board.passes >= 2 };
   }
 
   // ------------------------------------------------------------------ SGF

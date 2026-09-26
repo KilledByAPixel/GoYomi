@@ -6,6 +6,19 @@ import { Game } from '../src/game.js';
 const P = s => parsePt(s);
 const playAll = (g, list) => list.split(' ').forEach(m => assert.ok(g.play(P(m)), `move ${m}`));
 
+test('recipe of a finished game asks the engine to play the position out', () => {
+  const g = new Game();
+  playAll(g, 'E5 C3');
+  assert.equal(g.recipe().resetPasses, false);
+  g.play(PASS);
+  assert.equal(g.recipe().resetPasses, false, 'one pass: the game is still on');
+  g.play(PASS);
+  assert.ok(g.isOver());
+  // Without this, playouts from the two-pass position end immediately: nothing
+  // is ever captured, so no stone looks dead and enclosed areas count for nobody.
+  assert.equal(g.recipe().resetPasses, true);
+});
+
 test('alternating play, undo and redo keep the branch', () => {
   const g = new Game();
   playAll(g, 'E5 C3 G7');
