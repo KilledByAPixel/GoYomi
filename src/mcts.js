@@ -77,9 +77,17 @@ function atariMovesNear(b, p, out) {
 }
 
 function atariMovesAll(b, out) {
-  const st = ++chainStamp;
-  for (const p of POINTS) atariChain(b, p, st, out);
+  const st = ++chainStamp, color = b.color, head = b.head;
+  for (let i = 0; i < POINTS.length; i++) {
+    const p = POINTS[i];
+    // Cheap skips before the call: empty points, and stones of chains already seen.
+    if (color[p] === EMPTY || chainMark[head[p]] === st) continue;
+    atariChain(b, p, st, out);
+  }
 }
+
+// The 8 neighbours: orthogonal first, then diagonal.
+const NB8 = Int32Array.from([...D4, ...DIAG]);
 
 // Empty points around the last move matching a 3x3 pattern.
 function pat3Moves(b, out) {
@@ -88,8 +96,7 @@ function pat3Moves(b, out) {
   const color = b.color;
   const start = randInt(8);
   for (let k = 0; k < 8; k++) {
-    const i = (start + k) % 8;
-    const p = last + (i < 4 ? D4[i] : DIAG[i - 4]);
+    const p = last + NB8[(start + k) & 7];
     if (color[p] === EMPTY && matchesPat3(color, p)) out.push(p);
   }
 }
@@ -100,7 +107,8 @@ const tmp = [];
 
 function tryMove(b, p, rejectProb) {
   const c = b.toPlay;
-  if (!b.isLegal(p, c) || b.isEyeish(p, c)) return false;
+  // Eye test first: it's cheaper, and late in a playout most empty points are eyes.
+  if (b.isEyeish(p, c) || !b.isLegal(p, c)) return false;
   if (rejectProb > 0 && rand() < rejectProb && b.isSelfAtari(p, c, 2)) return false;
   return true;
 }
@@ -116,10 +124,12 @@ export function playoutMove(b) {
     if (!tmp.length && rand() < P.probGlobalAtari) atariMovesAll(b, tmp);
     const n = tmp.length / 2;
     if (n) {
-      const s = randInt(n);
+      // Try every candidate once, starting at a random one (wrap without modulo).
+      let i = randInt(n);
       for (let k = 0; k < n; k++) {
-        const p = tmp[((s + k) % n) * 2];
+        const p = tmp[i * 2];
         if (tryMove(b, p, P.probRejectHeuristicSelfAtari)) return p;
+        if (++i === n) i = 0;
       }
     }
   }
@@ -128,10 +138,12 @@ export function playoutMove(b) {
     pat3Moves(b, tmp);
     for (const p of tmp) if (tryMove(b, p, P.probRejectHeuristicSelfAtari)) return p;
   }
-  const n = b.emptyCount, s = randInt(n), empty = b.empty;
+  const n = b.emptyCount, empty = b.empty;
+  let i = randInt(n);
   for (let k = 0; k < n; k++) {
-    const p = empty[(s + k) % n];
+    const p = empty[i];
     if (tryMove(b, p, P.probRejectRandomSelfAtari)) return p;
+    if (++i === n) i = 0;
   }
   return PASS;
 }
