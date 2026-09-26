@@ -24,7 +24,9 @@ for (let g = 0; g < games; g++) {
     game.play(move);
   }
   if (!winner) {
-    const s = new Search(game.board, { komi: 7 }); s.run(4000);
+    // Play the final position out (passes reset), or no stone ever looks dead.
+    const final = game.board.clone(); final.passes = 0;
+    const s = new Search(final, { komi: 7 }); s.run(4000);
     const sc = game.score(estimateDead(game.board, s.results().ownership));
     winner = sc.winner; how = sc.text;
   }

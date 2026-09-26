@@ -271,6 +271,17 @@ function principalVariation(node, max = 8) {
   return out;
 }
 
+// Tromp-Taylor area score of a finished board (black minus white, no komi);
+// fills owner like playout() does.
+function terminalScore(b, owner) {
+  const a = b.areaScore();
+  for (let i = 0; i < POINTS.length; i++) {
+    const o = a.owner[POINTS[i]];
+    owner[i] = o === BLACK ? 1 : o === WHITE ? -1 : 0;
+  }
+  return a.black - a.white;
+}
+
 export class Search {
   // opts: { komi, forbidden(p) => bool for root superko, seed }
   constructor(board, opts = {}) {
@@ -320,7 +331,10 @@ export class Search {
         path.push(node);
         if (!node.children && node.n >= P.expandVisits && b.passes < 2) expand(node, b, null);
       }
-      const raw = playout(b, amaf, this.owner);
+      // Two passes inside the tree end the game as it stands: count it by area.
+      // (playoutScore is only right for played-out boards where every empty
+      // point is an eye; on a real position it misses most territory.)
+      const raw = b.passes >= 2 ? terminalScore(b, this.owner) : playout(b, amaf, this.owner);
       const score = raw - this.komi;
       const winner = score > 0 ? BLACK : score < 0 ? WHITE : 0;
       this.playouts++;
