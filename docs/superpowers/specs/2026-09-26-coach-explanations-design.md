@@ -95,19 +95,28 @@ contact, opening height, first line early).
 
 **Threat and purpose** (need the threat and baseline reads):
 
-- *threat*: the threat read's best move for the mover, the board facts of
-  that move on the threat position (captures N, cuts, ataris), and its worth:
-  threat-read score minus after-read score, from the mover's side. No threat
-  when the worth is below 2 points.
+- *threat*: among the threat read's moves within Manhattan distance 3 of the
+  move and with at least 5% of the top move's visits, the most visited one
+  whose board facts on the threat position include a capture, an atari or a
+  cut candidate. Reported as that move and what it does, **without a point
+  value**: probing while planning showed that on an open board any second
+  move is worth about 10 points, so a number would mislead even for a quiet
+  move.
 - *initiative*: sente when the after read's expected reply is within distance
-  2 of the move or answers the threat, gote otherwise.
+  2 of the move or distance 1 of the threat move, gote otherwise. Only
+  reported alongside a threat.
 - *purpose*: per-point ownership gain, after read minus baseline read, from the
-  mover's side, summed into nine regions (four 3×3 corners, four sides,
-  centre). The biggest region or two are reported, as *protects* (the mover
-  owned it in the before read), *reduces* (the opponent owned it) or *claims*
-  (neutral), with an approximate point value (sum / 2, as today).
+  mover's side, halved and summed into nine regions (four 3×3 corners, four
+  sides, centre). Regions gaining at least 1 point are candidates; the top one
+  is reported, plus the second if it gains at least half as much. Each is
+  *protects* (the mover's average ownership there in the before read > 0.3),
+  *reduces* (< −0.3) or *claims* (otherwise). Ownership gains are spread thin
+  across the board, so the regions say *where*; *how much* is the move's
+  value: after-read score minus baseline score, from the mover's side (both
+  reads have the opponent to move, so no tempo is counted). The value is
+  reported when at least 2 points.
 - *otherwise*: the baseline read's best opponent move ("otherwise White
-  plays E4") and its value.
+  plays E4"), reported when the move's value is at least 2 points.
 
 **The coach's own suggestions.** When a read finishes, if its top move plays
 at a point the mover already owns firmly (ownership ≥ 0.8, e.g. capturing dead
@@ -144,11 +153,11 @@ Example, the tester's G3 move:
 - Beginners: "Good move. Puts the White stone at G4 in atari: it has only 1
   liberty left. White has to save it, and then your stones guard the bottom of
   the board."
-- Improving: "Good. Threatens to capture G4 (worth about 6 points). Once White
-  answers at H4, it secures your lower side, and you get to play elsewhere
-  next (sente)."
-- Strong: "Best move. Sente: threatens G4 (≈6 pts). After H4 it secures the
-  lower side (+8). Otherwise White plays G3 (≈5 pts)."
+- Improving: "Good. Threatens to capture White's stone at G4. Once White
+  answers at H4, it secures your lower side (worth about 8 points), and you
+  get to play elsewhere next (sente)."
+- Strong: "Best move. Sente: threatens to capture White's stone at G4. After
+  H4 it secures your lower side (+8). Otherwise White plays G3."
 
 AI moves with "Grade AI moves" off, all levels: urgent board facts only, e.g.
 "White played D4. Your 2 stones at C3 are now in atari." (atari on the
@@ -160,8 +169,12 @@ player's stones, captures, confirmed cuts).
   (ownership arrays, PVs), including regressions for the sacrifice block called
   a cut, an atari on dead stones, a G3-style threat and purpose, and a
   hopeless rescue.
-- Threat and purpose with real searches: a few seeded tests on clear-cut
-  positions, in the style of `test/mcts.test.js`.
+- Real searches, seeded, in the style of `test/mcts.test.js`: a corner move
+  reports "claims" for that corner, and an atari on stones already dead
+  inside the mover's wall reports a dead target (both checked stable across
+  seeds while planning). Threat detection is tested with hand-made reads
+  only: on sparse boards the engine often (rightly) declines to save or
+  capture lone stones, so real-search threat tests would be fragile.
 - Wording: each fact bundle at all three levels; Beginner text contains no
   point values or percentages; labels match the table.
 - Level grade mapping and flagging: unit tests.
