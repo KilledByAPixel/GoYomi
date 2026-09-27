@@ -92,6 +92,7 @@ function pvStones(color, moves) {
 
 function newGame() {
   cancelAI();
+  stopCoach();
   game = new Game({ komi: settings.komi, handicap: settings.handicap });
   mode = 'play'; scoring = null; resigned = 0; better = null; hintOn = false;
   flashMsg = null;
@@ -130,7 +131,7 @@ function onClick(p) {
   const node = game.current;
   if (game.isOver(node)) { flash('Both players passed. The game is over.'); return; }
   const ai = aiColor();
-  if (ai && !resigned && node.board.toPlay === ai) {
+  if (ai && node.board.toPlay === ai) {
     flash('It\'s the AI\'s turn in this position. Press "AI move" to let it play, or step back.');
     return;
   }
@@ -274,7 +275,10 @@ function adoptAfterRead(node) {
 // A node's outstanding grading work, most urgent first.
 function coachWork(node, out, ahead) {
   if (!node) return;
-  if (!node.analysisDone && !adoptAfterRead(node)) out.push(node.parent ? { kind: 'after', base: node.parent, move: node.move } : { kind: 'root', node });
+  if (!node.analysisDone) {
+    if (adoptAfterRead(node)) tryGrade(node);
+    else out.push(node.parent ? { kind: 'after', base: node.parent, move: node.move } : { kind: 'root', node });
+  }
   if (!node.parent || !isGraded(node)) return;
   if (node.checkMove != null) out.push({ kind: 'after', base: node.parent, move: node.checkMove });
   // Moves other than the coach's choice often need the check read against it:
@@ -312,6 +316,7 @@ function coachQueue(max) {
   coachWork(cur.parent, out, true);
   explainWork(cur, out);
   if (cur.parent && cur.parent.parent) explainWork(cur.parent, out);
+  coachWork(game.line()[game.line().indexOf(cur) + 1], out); // reviewing: the next real move first
   preWork(cur, out);
   const line = game.line(), idx = line.indexOf(cur);
   for (let d = 1; d < line.length && out.length < max * 2; d++) {
@@ -569,7 +574,7 @@ function hintList(an) {
 function hoverInfo() {
   const p = hoverPt, node = game.current, b = node.board;
   if (p === null || mode !== 'play' || aiNode || game.isOver(node) || b.color[p] !== EMPTY) return null;
-  if (aiColor() && !resigned && b.toPlay === aiColor()) return null;
+  if (resigned || (aiColor() && b.toPlay === aiColor())) return null;
   const c = b.toPlay, r = game.check(p);
   if (!r.ok) return { p, color: c, ok: false, reason: r.reason };
   const info = { p, color: c, ok: true, detail: settings.show.preview };
@@ -803,9 +808,9 @@ function renderNav() {
   $('#moveLabel').textContent = node.parent ? `Move ${node.depth} · ${colorName(node.color)} ${ptName(node.move)}` : 'Start';
   $('[data-nav=first]').disabled = $('[data-nav=prev]').disabled = !node.parent;
   $('[data-nav=next]').disabled = $('[data-nav=last]').disabled = !node.children.length;
-  const humanTurn = mode === 'play' && !aiNode && !game.isOver() && !(aiColor() && !resigned && game.toPlay === aiColor()) && !resigned;
+  const humanTurn = mode === 'play' && !aiNode && !game.isOver() && !resigned && !(aiColor() && game.toPlay === aiColor());
   $('#btnPass').disabled = !humanTurn;
-  $('#btnUndo').disabled = !node.parent;
+  $('#btnUndo').disabled = !node.parent && !resigned;
   $('#btnAI').disabled = !!aiNode || mode !== 'play' || game.isOver() || !!resigned;
   $('#btnResign').textContent = game.isOver() ? 'Count' : 'Resign';
   $('#btnResign').disabled = mode === 'score' || (!game.isOver() && (!settings.human || !!resigned));
@@ -902,6 +907,7 @@ function importSGF(text) {
   try {
     const g = Game.fromSGF(text);
     cancelAI();
+    stopCoach();
     game = g;
     settings.human = 0;
     mode = 'play'; scoring = null; resigned = 0; better = null;
@@ -967,7 +973,8 @@ function setupControls() {
     if (scoring && scoring.pending) { e.target.value = String(settings.coachPlayouts); return; }
     settings.coachPlayouts = +e.target.value;
     // Re-read positions at the new depth.
-    for (const n of game.line()) { n.analysisDone = false; n.after = null; n.reads = null; n.checkMove = null; }
+    const reset = n => { n.analysisDone = false; n.after = null; n.reads = null; n.checkMove = null; n.children.forEach(reset); };
+    reset(game.root);
     stopCoach();
     save(); scheduleCoach();
   };
