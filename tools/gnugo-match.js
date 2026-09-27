@@ -1,19 +1,30 @@
-// Plays GoYomi's AI against GNU Go over GTP (the Go Text Protocol).
+// Plays GoYomi's AI against GNU Go or KataGo over GTP (the Go Text Protocol).
 //
 //   node tools/gnugo-match.js --gnugo path/to/gnugo.exe --level 8 --gnulevel 10 --games 20 --jobs 4
+//   node tools/gnugo-match.js --katago path/to/katago.exe --model net.bin.gz --visits 50 --games 20 --jobs 4
 //
 // --level     GoYomi AI level, 1 (Pebble) to 8 (Dragon)        default 8
 // --gnulevel  GNU Go strength, 0 to 10 (10 is its strongest)    default 10
+// --katago    play KataGo instead of GNU Go (path to katago.exe)
+// --model     KataGo network file (required with --katago)
+// --config    KataGo GTP config        default: default_gtp.cfg next to katago.exe
+// --visits    KataGo visits per move (its strength)             default 100
+// --profile   imitate human players of a rank instead, e.g. rank_5k, rank_1d
+//             (needs --human-model b18c384nbt-humanv0.bin.gz; config default
+//             gtp_human5k_example.cfg next to katago.exe)
 // --games     number of games; colours alternate                default 10
 // --jobs      games played in parallel (one process each)       default 1
 // --komi      komi for White                                    default 7
+// --sgf       write the games to this SGF file
 //
-// Each game is scored by GNU Go's final_score under Chinese (area) rules, as an
-// independent referee. GoYomi's own count is recorded too; disagreements are shown.
-// GoYomi moves exactly as the app's AI does: same search, playouts and move choice.
+// Each game is scored by the opponent engine's final_score under area rules,
+// as an independent referee. GoYomi's own count is recorded too; disagreements
+// are shown. GoYomi moves exactly as the app's AI does: same search, playouts
+// and move choice. KataGo plays GoYomi's rules: area scoring, positional
+// superko, no suicide.
 import { spawn, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { BLACK, WHITE, PASS, ptName, parsePt } from '../src/board.js';
 import { Search, seed } from '../src/mcts.js';
 import { Game } from '../src/game.js';
@@ -25,11 +36,29 @@ const opts = {
   gnugo: arg('gnugo') ? resolve(arg('gnugo')) : 'gnugo',
   level: +arg('level', 8) - 1,
   gnulevel: +arg('gnulevel', 10),
+  katago: arg('katago') ? resolve(arg('katago')) : null,
+  model: arg('model') ? resolve(arg('model')) : null,
+  visits: +arg('visits', 100),
   games: +arg('games', 10),
   jobs: +arg('jobs', 1),
   komi: +arg('komi', 7),
   maxMoves: 250,
 };
+if (opts.katago && !opts.model) throw new Error('--katago needs --model (a KataGo network file)');
+opts.profile = arg('profile');
+opts.humanModel = arg('human-model') ? resolve(arg('human-model')) : null;
+if (opts.profile && !opts.humanModel) throw new Error('--profile needs --human-model (b18c384nbt-humanv0.bin.gz)');
+opts.config = opts.katago && resolve(arg('config') || join(dirname(opts.katago), opts.profile ? 'gtp_human5k_example.cfg' : 'default_gtp.cfg'));
+// The opponent's name in the results.
+const THEM = !opts.katago ? `GNU Go L${opts.gnulevel}` : opts.profile ? `KataGo ${opts.profile}` : `KataGo ${opts.visits}v`;
+
+// KataGo's command line: plain search at a fixed number of visits, or human-style play at a rank.
+function katagoArgs() {
+  const over = opts.profile
+    ? `logDir=,delayMoveScale=0,delayMoveMax=0,humanSLProfile=${opts.profile}${arg('visits') ? `,maxVisits=${opts.visits}` : ''}`
+    : `logDir=,maxVisits=${opts.visits},numSearchThreads=${Math.min(8, Math.max(1, opts.visits))}`;
+  return ['gtp', '-model', opts.model, '-config', opts.config, ...(opts.profile ? ['-human-model', opts.humanModel] : []), '-override-config', over];
+}
 
 // ------------------------------------------------------------------ GTP client
 
@@ -42,8 +71,8 @@ class Gtp {
     this.proc.stdout.on('data', d => { this.buf += d.replace(/\r/g, ''); this.drain(); });
     const fail = e => { for (const w of this.waiting) w.reject(e); this.waiting = []; };
     this.proc.on('error', fail);
-    // If GNU Go dies, say so instead of leaving the game waiting (the worker would exit silently).
-    this.proc.on('exit', code => fail(new Error(`GNU Go exited (code ${code})`)));
+    // If the engine dies, say so instead of leaving the game waiting (the worker would exit silently).
+    this.proc.on('exit', code => fail(new Error(`${THEM} exited (code ${code})`)));
   }
   drain() {
     let i;
@@ -72,10 +101,13 @@ async function playGame(index) {
   const ours = index % 2 === 0 ? BLACK : WHITE; // alternate colours
   const lv = LEVELS[opts.level];
   seed((index + 1) * 7919);
-  const gnu = new Gtp(opts.gnugo, ['--mode', 'gtp', '--boardsize', '9', '--chinese-rules',
-    '--komi', String(opts.komi), '--level', String(opts.gnulevel), '--seed', String(index + 1)]);
+  const gnu = opts.katago
+    ? new Gtp(opts.katago, katagoArgs())
+    : new Gtp(opts.gnugo, ['--mode', 'gtp', '--boardsize', '9', '--chinese-rules',
+      '--komi', String(opts.komi), '--level', String(opts.gnulevel), '--seed', String(index + 1)]);
   await gnu.send('boardsize 9');
   await gnu.send('clear_board');
+  if (opts.katago) await gnu.send('kata-set-rules koPOSITIONALscoreAREAtaxNONEsui0button0');
   await gnu.send(`komi ${opts.komi}`);
 
   const game = new Game({ komi: opts.komi });
@@ -104,7 +136,7 @@ async function playGame(index) {
       const reply = (await gnu.send(`genmove ${gtpColor(c)}`)).toUpperCase();
       if (reply === 'RESIGN') { resigned = c; break; }
       move = parsePt(reply);
-      if (move === null || !game.check(move).ok) throw new Error(`game ${index + 1}: GNU Go played ${reply}, not legal here`);
+      if (move === null || !game.check(move).ok) throw new Error(`game ${index + 1}: ${THEM} played ${reply}, not legal here`);
     }
     game.play(move);
   }
@@ -123,10 +155,10 @@ async function playGame(index) {
   }
   await gnu.close();
   return {
-    game: index + 1, ours: ours === BLACK ? 'B' : 'W', winner: winner === ours ? 'GoYomi' : winner ? 'GNU Go' : 'draw',
+    game: index + 1, ours: ours === BLACK ? 'B' : 'W', winner: winner === ours ? 'GoYomi' : winner ? THEM : 'draw',
     result, oursCount, moves: game.current.depth, minutes: +((Date.now() - t0) / 60000).toFixed(1),
-    sgf: game.toSGF({ black: ours === BLACK ? `GoYomi ${lv.name}` : `GNU Go L${opts.gnulevel}`,
-      white: ours === WHITE ? `GoYomi ${lv.name}` : `GNU Go L${opts.gnulevel}`, result }),
+    sgf: game.toSGF({ black: ours === BLACK ? `GoYomi ${lv.name}` : THEM,
+      white: ours === WHITE ? `GoYomi ${lv.name}` : THEM, result }),
   };
 }
 
@@ -138,7 +170,7 @@ if (process.argv.includes('--worker')) {
 } else {
   const self = fileURLToPath(import.meta.url);
   const lvName = LEVELS[opts.level].name;
-  console.log(`GoYomi ${lvName} (level ${opts.level + 1}) vs GNU Go level ${opts.gnulevel}, ${opts.games} games, komi ${opts.komi}, ${opts.jobs} at a time`);
+  console.log(`GoYomi ${lvName} (level ${opts.level + 1}) vs ${THEM}, ${opts.games} games, komi ${opts.komi}, ${opts.jobs} at a time`);
   const results = [];
   let next = 0;
   const runOne = () => new Promise(resolve => {
@@ -148,19 +180,19 @@ if (process.argv.includes('--worker')) {
     child.on('message', r => {
       results.push(r);
       if (r.error) console.log(`game ${r.game}: ERROR ${r.error}`);
-      else console.log(`game ${String(r.game).padStart(2)}: GoYomi as ${r.ours}  ${r.winner.padEnd(6)}  ${r.result.padEnd(7)} (GoYomi counts ${r.oursCount || '-'})  ${r.moves} moves, ${r.minutes} min`);
+      else console.log(`game ${String(r.game).padStart(2)}: GoYomi as ${r.ours}  ${r.winner.padEnd(Math.max(6, THEM.length))}  ${r.result.padEnd(7)} (GoYomi counts ${r.oursCount || '-'})  ${r.moves} moves, ${r.minutes} min`);
     });
     child.on('exit', () => resolve(runOne()));
   });
   await Promise.all(Array.from({ length: Math.min(opts.jobs, opts.games) }, runOne));
 
   const ok = results.filter(r => !r.error);
-  const wins = ok.filter(r => r.winner === 'GoYomi').length, losses = ok.filter(r => r.winner === 'GNU Go').length;
+  const wins = ok.filter(r => r.winner === 'GoYomi').length, losses = ok.filter(r => r.winner === THEM).length;
   const byColor = col => { const g = ok.filter(r => r.ours === col); return `${g.filter(r => r.winner === 'GoYomi').length}/${g.length}`; };
   const disagree = ok.filter(r => r.oursCount && r.oursCount.startsWith('B') !== r.result.startsWith('B')).length;
-  console.log(`\nRESULT GoYomi ${lvName} ${wins} - ${losses} GNU Go L${opts.gnulevel}` +
+  console.log(`\nRESULT GoYomi ${lvName} ${wins} - ${losses} ${THEM}` +
     `  (as Black ${byColor('B')}, as White ${byColor('W')}; ${ok.length - wins - losses} draws, ${results.length - ok.length} errors)`);
-  console.log(`Counting: GoYomi and GNU Go disagreed on the winner in ${disagree} of ${ok.filter(r => r.oursCount).length} counted games`);
+  console.log(`Counting: GoYomi and ${THEM} disagreed on the winner in ${disagree} of ${ok.filter(r => r.oursCount).length} counted games`);
   if (arg('sgf')) {
     const fs = await import('node:fs');
     fs.writeFileSync(arg('sgf'), ok.sort((a, b) => a.game - b.game).map(r => r.sgf).join('\n'));
