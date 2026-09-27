@@ -151,9 +151,12 @@ export function describe(facts, ctx) {
       case 'connect': out.push(`Connects ${f.groups} groups into one.`); break;
       case 'alreadyConnected': {
         if (!ctx.shown) break; // a needless connection or a solid one depends on the grade
-        if (!ctx.shown.flagged) out.push('Makes the diagonal connection solid.');
-        else out.push(B ? `${cap(w.poss(mover))} stones were already safely connected diagonally. Filling in between them makes a clumsy shape called an empty triangle.`
-          : `${cap(w.poss(mover))} stones were already connected diagonally, so connecting here makes an empty triangle.`);
+        const bamboo = f.via === 'bamboo';
+        if (!ctx.shown.flagged) out.push(bamboo ? 'Makes the bamboo joint solid.' : 'Makes the diagonal connection solid.');
+        else if (B) {
+          const how = bamboo ? `: there were two gaps between them, and if ${w.subj(opp)} ${w.verb(opp, 'play', 'plays')} in one, ${w.subj(mover)} can fill the other` : ' diagonally';
+          out.push(`${cap(w.poss(mover))} stones were already safely connected${how}. Filling in between them makes a clumsy shape called an empty triangle.`);
+        } else out.push(`${cap(w.poss(mover))} stones were already connected ${bamboo ? 'by a bamboo joint' : 'diagonally'}, so connecting here makes an empty triangle.`);
         break;
       }
       case 'emptyTriangle':

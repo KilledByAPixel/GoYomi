@@ -100,6 +100,10 @@ test('describe: empty triangles and first-line moves are only criticised when th
   assert.match(describe(filled, flagged('beginner'))[0], /already safely connected diagonally/);
   assert.deepEqual(describe(filled, ctx('improving')), ['Makes the diagonal connection solid.']);
   assert.deepEqual(describe(filled, ctx('improving', { shown: undefined })), [], 'not until the grade is known');
+  const joint = [{ type: 'alreadyConnected', via: 'bamboo' }, { type: 'emptyTriangle' }];
+  assert.deepEqual(describe(joint, flagged('improving')), ['Your stones were already connected by a bamboo joint, so connecting here makes an empty triangle.']);
+  assert.match(describe(joint, flagged('beginner'))[0], /two gaps between them, and if White plays in one, you can fill the other/);
+  assert.deepEqual(describe(joint, ctx('improving')), ['Makes the bamboo joint solid.']);
   const bent = [{ type: 'emptyTriangle' }, { type: 'shape', shape: 'extend' }];
   assert.deepEqual(describe(bent, flagged('improving')), ['Makes an empty triangle, an inefficient shape.']);
   assert.deepEqual(describe(bent, ctx('improving')), ['Extends solidly from its own stones.']);

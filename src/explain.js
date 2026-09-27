@@ -64,7 +64,12 @@ export function boardFacts(before, after, move) {
   // connected already: whichever side the opponent pushes in, the other connects.
   const diagonalLink = friends.size === 2 && corners.some(([q1, q2, far]) =>
     before.color[q1] === c && before.color[q2] === c && before.head[q1] !== before.head[q2] && before.color[far] === EMPTY);
-  if (diagonalLink) out.push({ type: 'alreadyConnected' });
+  // Bamboo joint: two parallel pairs with two gaps between them, the move filling one.
+  const bambooLink = friends.size === 2 && D4.some(d => D4.some(e => e !== d && e !== -d &&
+    [move - d, move + d, move - d + e, move + d + e].every(q => before.color[q] === c) &&
+    before.color[move + e] === EMPTY && before.head[move - d] !== before.head[move + d]));
+  const via = diagonalLink ? 'diagonal' : bambooLink ? 'bamboo' : null;
+  if (via) out.push({ type: 'alreadyConnected', via });
   else if (friends.size >= 2) out.push({ type: 'connect', groups: friends.size });
   // Only a candidate: whether it really cuts depends on how play goes on (lookAheadFacts).
   if (enemies.size >= 2 && !captured.length && libs >= 2) out.push({ type: 'separates', at: [...enemies.values()] });

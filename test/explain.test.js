@@ -40,6 +40,18 @@ test('boardFacts: filling a diagonal connection is an empty triangle, not a conn
   assert.deepEqual(types(real).filter(t => t === 'alreadyConnected' || t === 'emptyTriangle'), []);
 });
 
+test('boardFacts: filling a bamboo joint', () => {
+  // Black pairs D5-D6 and F5-F6 with gaps at E5 and E6.
+  const joint = Board.fromRows(['.........', '.........', '.........', '...X.X...', '...X.X...', '.........', '.........', '.........', '.........'], BLACK);
+  const facts = boardFacts(joint, played(joint, 'E5'), P('E5'));
+  assert.equal(facts.find(f => f.type === 'alreadyConnected').via, 'bamboo');
+  assert.ok(types(facts).includes('emptyTriangle') && !types(facts).includes('connect'));
+  // With White in the other gap, E5 is a real connection.
+  const pushed = Board.fromRows(['.........', '.........', '.........', '...XOX...', '...X.X...', '.........', '.........', '.........', '.........'], BLACK);
+  const real = types(boardFacts(pushed, played(pushed, 'E5'), P('E5')));
+  assert.ok(real.includes('connect') && !real.includes('alreadyConnected') && !real.includes('emptyTriangle'), real.join());
+});
+
 test('boardFacts: an empty triangle from a single group', () => {
   // Black D5 and D6; E5 makes an L with E6 empty.
   const pair = Board.fromRows(['.........', '.........', '.........', '...X.....', '...X.....', '.........', '.........', '.........', '.........'], BLACK);
