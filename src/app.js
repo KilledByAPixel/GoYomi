@@ -5,9 +5,8 @@ import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
 import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
-import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote } from './wording.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
-import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
@@ -662,22 +661,11 @@ function renderCoach() {
   };
 
   // Live warnings about the position on the board.
-  const b = node.board, me = b.toPlay;
+  const b = node.board;
   let warn = '';
   if (settings.show.atari && mode === 'play' && !game.isOver(node)) {
-    for (const t of threats(b)) {
-      if (t.libs.length !== 1) continue;
-      const n = t.stones.length, where = ptName(t.stones[0]), lib = ptName(t.libs[0]);
-      const stones = n > 1 ? `${n} stones at ${where} are` : `stone at ${where} is`;
-      if (t.color === me) {
-        const trapped = ladderCapture(b, t.stones[0]);
-        warn += trapped
-          ? `<li class="warn">${whose(t.color)} ${stones} in atari and can't escape: running at ${lib} just leads to capture (a ladder or a dead end). Often it's better to play elsewhere.</li>`
-          : `<li class="warn">${whose(t.color)} ${stones} in atari. Run at ${lib}, or capture a neighbour, to save ${n > 1 ? 'them' : 'it'}.</li>`;
-      } else {
-        warn += `<li class="chance">${whose(t.color)} ${stones} in atari: ${who(me) === 'You' ? 'you' : colorName(me)} can capture at ${lib}.</li>`;
-      }
-    }
+    warn = atariWarnings(b, p => game.check(p), { whose: c => whose(c), who: c => who(c) })
+      .map(w => `<li class="${w.kind}">${w.text}</li>`).join('');
   }
   setHTML($('#warnings'), warn);
 

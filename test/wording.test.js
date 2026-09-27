@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict, describe, describeNote } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings } from '../src/wording.js';
+import { Game } from '../src/game.js';
 
 const P = parsePt;
 const KEYS = ['best', 'good', 'inaccuracy', 'mistake', 'blunder'];
@@ -129,4 +130,21 @@ test('describe: with intent, a cut candidate is worded as an aim', () => {
   const f = [{ type: 'separates', at: [P('D5'), P('F5')] }, { type: 'shape', shape: 'contact' }];
   assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK, intent: true }), ['Aims to cut your stones apart.']);
   assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK }), ['Attaches to an enemy stone (contact play).']);
+});
+
+const NAMES = { whose: c => c === BLACK ? 'Your' : 'White\'s', who: c => c === BLACK ? 'You' : 'White' };
+
+test('atariWarnings: a capture forbidden by ko is explained, not recommended', () => {
+  const g = new Game();
+  for (const m of 'D5 F6 E6 G5 E4 F4 F5 E5'.split(' ')) g.play(P(m));
+  const chance = atariWarnings(g.board, p => g.check(p), NAMES).find(w => w.kind === 'chance');
+  assert.match(chance.text, /you can't capture at F5 right away because of ko/);
+  assert.match(chance.text, /if White doesn't answer it, you can take then/);
+});
+
+test('atariWarnings: a legal capture is still recommended', () => {
+  const g = new Game();
+  for (const m of 'A2 A1 B2 J9'.split(' ')) g.play(P(m));
+  const chance = atariWarnings(g.board, p => g.check(p), NAMES).find(w => w.kind === 'chance');
+  assert.equal(chance.text, 'White\'s stone at A1 is in atari: you can capture at B1.');
 });

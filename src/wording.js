@@ -3,7 +3,8 @@
 // (stones and liberties, no numbers), 'improving' (points, threats, purpose)
 // and 'strong' (everything, tersely).
 import { BLACK, PASS, ptName } from './board.js';
-import { GRADES } from './coach.js';
+import { GRADES, threats } from './coach.js';
+import { ladderCapture } from './ladder.js';
 
 export const COACH_FOR = [
   { key: 'auto', label: 'Match AI strength' },
@@ -213,6 +214,32 @@ export function describeNote(facts, ctx) {
     if (f.type === 'capture') out.push(f.ko ? 'Takes the ko.' : `Captures ${w.stones(opp, f.stones)}.`);
     else if (f.type === 'atari') out.push(f.double ? `Double atari on ${w.poss(opp)} stones!` : `${cap(w.stones(opp, f.stones))} ${f.stones.length === 1 ? 'is' : 'are'} now in atari.`);
     else if (f.type === 'cut') out.push(`Cuts ${w.poss(opp)} stones apart.`);
+  }
+  return out;
+}
+
+const KO = new Set(['ko', 'superko']);
+
+// Warnings about chains in atari, checked against the rules: a capture or an
+// escape that ko forbids right now is explained instead of recommended.
+export function atariWarnings(board, check, names) {
+  const me = board.toPlay, out = [];
+  const subj = c => names.who(c) === 'You' ? 'you' : names.who(c) === 'AI' ? 'the AI' : names.who(c);
+  for (const t of threats(board)) {
+    if (t.libs.length !== 1) continue;
+    const n = t.stones.length, where = ptName(t.stones[0]), lib = ptName(t.libs[0]);
+    const stones = n > 1 ? `${n} stones at ${where} are` : `stone at ${where} is`;
+    const r = check(t.libs[0]), ko = !r.ok && KO.has(r.reason);
+    if (t.color === me) {
+      if (ko) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari, and ${subj(me)} can't run at ${lib} right now because of ko.` });
+      else if (ladderCapture(board, t.stones[0])) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari and can't escape: running at ${lib} just leads to capture (a ladder or a dead end). Often it's better to play elsewhere.` });
+      else out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari. Run at ${lib}, or capture a neighbour, to save ${n > 1 ? 'them' : 'it'}.` });
+    } else if (ko) {
+      const them = subj(t.color), does = them === 'you' ? 'don\'t' : 'doesn\'t';
+      out.push({ kind: 'chance', text: `${names.whose(t.color)} ${stones} in atari, but ${subj(me)} can't capture at ${lib} right away because of ko. Play a strong move somewhere else first (a ko threat); if ${them} ${does} answer it, ${subj(me)} can take then.` });
+    } else {
+      out.push({ kind: 'chance', text: `${names.whose(t.color)} ${stones} in atari: ${subj(me)} can capture at ${lib}.` });
+    }
   }
   return out;
 }
