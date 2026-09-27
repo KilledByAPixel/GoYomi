@@ -180,34 +180,44 @@ export class KataSearch {
     leaf.pending = false;
   }
 
-  // Runs up to `visits` more visits, in batches.
-  async run(visits) {
-    let left = visits;
-    while (left > 0) {
-      const size = Math.max(1, Math.min(this.batch, left, this.root.kids ? this.batch : 1));
-      const evals = [];
-      for (let i = 0; i < size; i++) {
-        const sel = this.select();
-        if (sel.leaf.terminal) { this.backup(sel, sel.leaf.terminal); left--; continue; }
-        if (sel.leaf.pending) {
-          // Collided with a leaf already waiting: take the virtual loss back and stop gathering.
-          for (const nd of sel.path) nd.vl--;
-          break;
-        }
-        sel.leaf.pending = true;
-        evals.push(sel);
+  // Picks up to max leaves for the net (fewer if they collide), with virtual
+  // loss on their paths. Finished-game leaves are counted at once.
+  gather(max) {
+    const out = [];
+    if (!this.root.kids && (this.root.pending || max < 1)) return out;
+    const size = this.root.kids ? max : 1;
+    for (let i = 0; i < size; i++) {
+      const sel = this.select();
+      if (sel.leaf.terminal) { this.backup(sel, sel.leaf.terminal); continue; }
+      if (sel.leaf.pending) {
+        // Collided with a leaf already waiting: take the virtual loss back and stop.
+        for (const nd of sel.path) nd.vl--;
+        break;
       }
-      if (!evals.length) continue;
-      const outs = await this.evaluator.evaluate(evals.map(e => e.pos));
-      evals.forEach((sel, i) => {
-        const out = outs[i], s = sign(sel.toPlay);
-        const win = s > 0 ? out.win : out.loss, loss = s > 0 ? out.loss : out.win;
-        if (this.center === null) this.center = s * out.lead;
-        const value = { win: win + out.noResult / 2, loss: loss + out.noResult / 2, lead: s * out.lead,
-          ownership: Float32Array.from(out.ownership, x => s * x) };
-        this.backup(sel, value, { out, legal: sel.legal, toPlay: sel.toPlay });
-      });
-      left -= evals.length;
+      sel.leaf.pending = true;
+      out.push(sel);
+    }
+    return out;
+  }
+
+  // Backs up the net's outputs for leaves from gather().
+  apply(sels, outs) {
+    sels.forEach((sel, i) => {
+      const out = outs[i], s = sign(sel.toPlay);
+      const win = s > 0 ? out.win : out.loss, loss = s > 0 ? out.loss : out.win;
+      if (this.center === null) this.center = s * out.lead;
+      const value = { win: win + out.noResult / 2, loss: loss + out.noResult / 2, lead: s * out.lead,
+        ownership: Float32Array.from(out.ownership, x => s * x) };
+      this.backup(sel, value, { out, legal: sel.legal, toPlay: sel.toPlay });
+    });
+  }
+
+  // Runs until `visits` more visits are done, in batches.
+  async run(visits) {
+    const target = this.root.n + visits;
+    while (this.root.n < target) {
+      const sels = this.gather(Math.min(this.batch, target - this.root.n));
+      if (sels.length) this.apply(sels, await this.evaluator.evaluate(sels.map(e => e.pos)));
     }
   }
 
