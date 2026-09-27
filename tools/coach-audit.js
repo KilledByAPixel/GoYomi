@@ -223,9 +223,17 @@ const CONFIGS = {
   single48k: { playouts: 48000, trees: 1 },
   // What the app does now ("Normal"): one 48k tree per position, averaged checks.
   app: { playouts: 48000, trees: 1, grade: checkedGrade, combine: 'avg' },
-  // KataGo's network at the app's Quick / Normal / Deep visits.
+  // KataGo's network at the app's Quick / Normal / Deep visits. Against a
+  // 1600-visit KataGo oracle (--engine katago, 211 moves in live games, 44 real
+  // mistakes), as false accusations / harsh / missed / mean error:
+  //   app          2/19 / 5/41 / 25 / 1.78    kataNormal       3/59 / 6/91 / 1 / 0.62
+  //   kataQuick    4/50 / 7/89 /  3 / 0.89    kataNormalPlain  3/55 / 7/93 / 1 / 0.65
+  //                                           kataNormalMin    1/51 / 6/90 / 1 / 0.62
+  // (The oracle is the same network, so its own blind spots don't show here.)
   kataQuick: { visits: 133, grade: checkedGrade, combine: 'avg' },
   kataNormal: { visits: 400, grade: checkedGrade, combine: 'avg' },
+  kataNormalPlain: { visits: 400 },
+  kataNormalMin: { visits: 400, grade: checkedGrade },
   kataDeep: { visits: 1000, grade: checkedGrade, combine: 'avg' },
 };
 
