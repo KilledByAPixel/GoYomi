@@ -3,7 +3,7 @@
 //   node tools/gnugo-match.js --gnugo path/to/gnugo.exe --level 8 --gnulevel 10 --games 20 --jobs 4
 //   node tools/gnugo-match.js --katago path/to/katago.exe --model net.bin.gz --visits 50 --games 20 --jobs 4
 //
-// --level     GoYomi AI level, 1 (Pebble) to 8 (Dragon)        default 8
+// --level     GoYomi AI level, 1 (Pebble) to 9 (Phoenix, KataGo) default 8
 // --gnulevel  GNU Go strength, 0 to 10 (10 is its strongest)    default 10
 // --katago    play KataGo instead of GNU Go (path to katago.exe)
 // --model     KataGo network file (required with --katago)
@@ -29,6 +29,10 @@ import { BLACK, WHITE, PASS, ptName, parsePt } from '../src/board.js';
 import { Search, seed } from '../src/mcts.js';
 import { Game } from '../src/game.js';
 import { LEVELS, chooseMove, shouldPass, estimateDead } from '../src/coach.js';
+import { buildPosition } from '../src/recipe.js';
+import { KataSearch } from '../src/katago/search.js';
+import { Evaluator } from '../src/katago/evaluator.js';
+import { loadNet } from './katago-node.js';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const opts = {
@@ -120,7 +124,18 @@ async function playGame(index) {
   while (!game.isOver() && game.current.depth < opts.maxMoves) {
     const c = game.toPlay;
     let move;
-    if (c === ours) {
+    if (c === ours && lv.katago) {
+      // KataGo's level: its reads are deep enough to decide about passing too.
+      const evaluator = new Evaluator((await loadNet()).net);
+      const s = new KataSearch(buildPosition(game.recipe()), { komi: opts.komi, evaluator, batch: 4 });
+      await s.run(lv.visits);
+      const r = s.results(60);
+      move = shouldPass(game, r, c) ? PASS : chooseMove(r, lv);
+      if (move !== PASS && !game.check(move).ok) {
+        move = r.allMoves.map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
+      }
+      await gnu.send(`play ${gtpColor(c)} ${ptName(move)}`);
+    } else if (c === ours) {
       const s = new Search(game.board, { komi: opts.komi, forbidden: p => !game.check(p).ok });
       s.run(lv.playouts);
       let r = s.results(60);
