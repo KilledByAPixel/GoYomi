@@ -266,9 +266,9 @@ export class Game {
     const komi = Number.isFinite(km) ? km : 7;
     const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
     const game = new Game({ komi, setup: setup.length ? setup : [] });
-    // A setup stone with no liberties would be captured as it's placed: refuse
-    // rather than show a different position from the one the file describes.
-    for (const [p, c] of setup) if (game.root.board.color[p] !== c) throw invalid(`the stone at ${ptName(p)} has no liberties`);
+    // A setup stone with no liberties is captured as it's placed or, placed last,
+    // left on the board without any: refuse rather than show an impossible position.
+    for (const [p, c] of setup) if (game.root.board.color[p] !== c || !game.root.board.libCount(p)) throw invalid(`the stone at ${ptName(p)} has no liberties`);
     game.handicap = handicap;
     game.handicapBonus = handicap >= 2 ? handicap : 0;
     const pl = rootProps.PL && rootProps.PL[0].toUpperCase();

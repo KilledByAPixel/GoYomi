@@ -251,7 +251,8 @@ async function aiMove(force = false, best = false) {
   let results = best && node.analysisDone ? node.analysis
     : await opponent.search(game.recipe(node), { playouts: lv.playouts, maxTime: 15000, reportMs: 0 });
   if (token !== aiToken) return;
-  if (best && results && !node.analysisDone) { node.analysis = preferUsefulMove(results); node.analysisDone = true; tryGrade(node); }
+  // A read started before the coach depth changed still picks the move, but isn't the analysis.
+  if (best && results && !node.analysisDone && lv.playouts === settings.coachPlayouts) { node.analysis = preferUsefulMove(results); node.analysisDone = true; tryGrade(node); }
   // When the human has passed, decide about passing with a deeper look.
   let passInfo = results;
   if (results && node.board.lastMove === PASS && node.parent) {
@@ -946,8 +947,11 @@ function load() {
 
 function exportSGF() {
   const name = c => !settings.human ? colorName(c) : c === settings.human ? 'Human' : `GoYomi ${level().name}`;
+  // Out of the count (reviewing, say), a counted game keeps its result: the line's end kept its dead stones.
+  const end = game.line().at(-1);
+  const counted = scoring ? (scoring.pending ? null : scoring) : game.isOver(end) && end.scoredDead ? { node: end, dead: end.scoredDead } : null;
   const result = resigned ? `${resigned === BLACK ? 'W' : 'B'}+R`
-    : scoring && !scoring.pending ? game.score(scoring.dead, scoring.node).text.replace('Draw (jigo)', '0') : '';
+    : counted ? game.score(counted.dead, counted.node).text.replace('Draw (jigo)', '0') : '';
   const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/x-go-sgf' }));

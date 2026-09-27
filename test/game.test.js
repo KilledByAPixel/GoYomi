@@ -233,4 +233,9 @@ test('SGF: the first move still decides who starts', () => {
 
 test('SGF: a starting stone with no liberties is refused', () => {
   assert.throws(() => Game.fromSGF('(;GM[1]SZ[9]AB[aa]AW[ab][ba])'), /starting position is invalid \(the stone at A9 has no liberties\)/);
+  // White goes on last, so nothing captures it: it just sits there with none.
+  assert.throws(() => Game.fromSGF('(;GM[1]SZ[9]AB[ab][ba]AW[aa])'), /the stone at A9 has no liberties/);
+  assert.throws(() => Game.fromSGF('(;GM[1]SZ[9]AB[ac][bb][ca]AW[aa][ab][ba])'), /has no liberties/);
+  // Stones sharing a liberty are fine.
+  assert.doesNotThrow(() => Game.fromSGF('(;GM[1]SZ[9]AB[ac][bb]AW[aa][ab][ba])'));
 });

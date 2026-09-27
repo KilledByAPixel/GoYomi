@@ -34,7 +34,9 @@ function bestVoice() {
   if (voice === undefined) {
     const list = speechSynthesis.getVoices ? speechSynthesis.getVoices() : [];
     if (!list.length) return null; // still loading: try again next time
-    voice = pickVoice(list, (typeof navigator !== 'undefined' && navigator.language) || 'en');
+    // The announcements are English: the browser's language only picks the accent (en-GB, en-AU...).
+    const nav = (typeof navigator !== 'undefined' && navigator.language) || '';
+    voice = pickVoice(list, /^en(-|$)/i.test(nav) ? nav : 'en');
   }
   return voice;
 }
@@ -46,7 +48,8 @@ function next() {
   const item = current = queue.shift();
   const utt = new SpeechSynthesisUtterance(item.text);
   const v = bestVoice();
-  if (v) { utt.voice = v; utt.lang = v.lang; }
+  if (v) utt.voice = v;
+  utt.lang = v ? v.lang : 'en';
   utt.onend = utt.onerror = () => { if (current === item) { current = null; next(); } };
   speechSynthesis.speak(utt);
 }
