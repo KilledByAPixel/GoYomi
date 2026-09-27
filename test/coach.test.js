@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -206,4 +206,27 @@ test('threats lists groups in atari with their liberty', () => {
   ]);
   const t = threats(b).find(x => x.color === WHITE);
   assert.deepEqual(t.libs, [pt(0, 1)]);
+});
+
+test('preferUsefulMove: a move inside settled territory gives way to an equal real move', () => {
+  const settled = POINTS.map(p => p === P('A1') ? 0.9 : 0);
+  const an = { toPlay: BLACK, ownership: settled, moves: [
+    { move: P('A1'), visits: 500, winrate: 0.6, score: 3 },
+    { move: P('E5'), visits: 400, winrate: 0.59, score: 2.8 },
+  ] };
+  an.allMoves = an.moves.slice();
+  preferUsefulMove(an);
+  assert.equal(an.moves[0].move, P('E5'));
+  assert.equal(an.allMoves[0].move, P('E5'));
+  // Clearly better, or not inside settled territory: left alone.
+  const better = { toPlay: BLACK, ownership: settled, moves: [{ move: P('A1'), visits: 500, winrate: 0.7, score: 6 }, { move: P('E5'), visits: 100, winrate: 0.6, score: 3 }] };
+  assert.equal(preferUsefulMove(better).moves[0].move, P('A1'));
+  const open = { toPlay: BLACK, ownership: POINTS.map(() => 0), moves: [{ move: P('A1'), visits: 500, winrate: 0.6, score: 3 }, { move: P('E5'), visits: 400, winrate: 0.6, score: 3 }] };
+  assert.equal(preferUsefulMove(open).moves[0].move, P('A1'));
+  // White's view: ownership and scores are black-positive.
+  const white = { toPlay: WHITE, ownership: POINTS.map(p => p === P('A1') ? -0.9 : 0), moves: [
+    { move: P('A1'), visits: 500, winrate: 0.6, score: -3 },
+    { move: P('E5'), visits: 400, winrate: 0.6, score: -2.8 },
+  ] };
+  assert.equal(preferUsefulMove(white).moves[0].move, P('E5'));
 });

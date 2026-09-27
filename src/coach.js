@@ -178,6 +178,25 @@ export function reviewNeeded(g, before) {
   return g.grade !== 'good' && g.bestMove !== PASS ? g.bestMove : null;
 }
 
+// Under area scoring a move inside your own settled territory (say, capturing
+// stones that are already dead) costs nothing, so the search can rate it best.
+// As advice it's useless when a real move is as good: put the runner-up first.
+// Mutates and returns the analysis.
+export function preferUsefulMove(an) {
+  const ms = an && an.moves;
+  if (!ms || ms.length < 2 || ms[0].move === PASS || ms[1].move === PASS) return an;
+  const [a, b] = ms, s = sign(an.toPlay);
+  if (an.ownership[POINTS.indexOf(a.move)] * s < 0.8) return an;
+  if ((a.score - b.score) * s > 0.5 || a.winrate - b.winrate > 0.02) return an;
+  ms[0] = b; ms[1] = a;
+  const all = an.allMoves;
+  if (all && all !== ms) {
+    const i = all.indexOf(a), j = all.indexOf(b);
+    if (i >= 0 && j >= 0) { all[i] = b; all[j] = a; }
+  }
+  return an;
+}
+
 // ------------------------------------------------------------ explanations
 
 function chainLibsAfterMove(b, p) { return b.libCount(p); }
