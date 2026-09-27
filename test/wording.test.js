@@ -112,3 +112,21 @@ test('describe: regions of the same kind share one verb', () => {
   ]);
   assert.equal(describe([f[0]], ctx('beginner'))[0], 'This claims the top of the board and the top-left corner.');
 });
+
+test('verdict: a flagged move that keeps the score is about win chance', () => {
+  const g = { grade: 'mistake', ptLoss: 0.02, wrLoss: 0.07, bestMove: P('D4') };
+  assert.equal(verdict(g, 'strong', levelGrade(g, 'strong')), 'Keeps about the same score as <b>D4</b>, but the win chance drops 7%.');
+  assert.equal(verdict(g, 'improving', levelGrade(g, 'improving')), 'About the same score as <b>D4</b>, but riskier.');
+  assert.equal(verdict(g, 'beginner', levelGrade(g, 'beginner')), 'The coach would have played <b>D4</b>.');
+});
+
+test('describe: the mover\'s own group is named for AI moves', () => {
+  assert.deepEqual(describe([{ type: 'ownEye' }], { level: 'improving', mover: WHITE, you: BLACK }), ['Fills its own eye — usually a waste, and can kill its own group.']);
+  assert.deepEqual(describe([{ type: 'ownEye' }], { level: 'improving', mover: BLACK, you: BLACK }), ['Fills its own eye — usually a waste, and can kill your own group.']);
+});
+
+test('describe: with intent, a cut candidate is worded as an aim', () => {
+  const f = [{ type: 'separates', at: [P('D5'), P('F5')] }, { type: 'shape', shape: 'contact' }];
+  assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK, intent: true }), ['Aims to cut your stones apart.']);
+  assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK }), ['Attaches to an enemy stone (contact play).']);
+});

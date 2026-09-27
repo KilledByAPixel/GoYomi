@@ -48,6 +48,10 @@ export function verdict(g, level, shown) {
       : `A fine move. The coach slightly preferred ${best}.`;
   }
   if (level === 'beginner') return `The coach would have played ${best}.`;
+  if (g.ptLoss < 0.5) {
+    return level === 'strong' ? `Keeps about the same score as ${best}, but the win chance drops ${Math.round(g.wrLoss * 100)}%.`
+      : `About the same score as ${best}, but riskier.`;
+  }
   const pts = `About <b>${g.ptLoss.toFixed(1)} points</b> worse than ${best}`;
   return level === 'strong' && g.wrLoss >= 0.01 ? `${pts} (win chance −${Math.round(g.wrLoss * 100)}%).` : `${pts}.`;
 }
@@ -161,8 +165,10 @@ export function describe(facts, ctx) {
         break;
       }
       case 'fewLibs': out.push(B ? `${cap(w.poss(mover))} group now has 2 liberties. Careful.` : 'The group has only 2 liberties — watch out for atari.'); break;
-      case 'ownEye': out.push(B ? 'Fills its own eye. A group needs two eyes to live, so this can kill it.' : 'Fills its own eye — usually a waste, and can kill your own group.'); break;
-      case 'shape': if (!threat && !purpose && !find('cut')) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]); break;
+      case 'ownEye': out.push(B ? 'Fills its own eye. A group needs two eyes to live, so this can kill it.'
+        : `Fills its own eye — usually a waste, and can kill ${mover === ctx.you ? 'your' : 'its'} own group.`); break;
+      case 'separates': if (ctx.intent) out.push(`Aims to cut ${w.poss(opp)} stones apart.`); break;
+      case 'shape': if (!threat && !purpose && !find('cut') && !(ctx.intent && find('separates'))) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]); break;
       case 'firstLine': out.push('First-line moves are usually small this early in the game.'); break;
       case 'threat': {
         const t = f.what;
