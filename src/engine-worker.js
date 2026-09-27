@@ -1,7 +1,8 @@
 // Web Worker wrapper around the MCTS. One job at a time; a new job or 'stop'
 // pre-empts the current one. Progress is streamed so the UI can animate.
-import { Board, BLACK, WHITE, PASS } from './board.js';
+import { Board } from './board.js';
 import { Search, seed } from './mcts.js';
+import { buildPosition } from './recipe.js';
 
 let job = null;
 seed((Math.random() * 0xffffffff) >>> 0);
@@ -13,26 +14,11 @@ channel.port1.onmessage = step;
 let stepQueued = false;
 const yieldThen = () => { if (!stepQueued) { stepQueued = true; channel.port2.postMessage(0); } };
 
-// Rebuild the position (and superko history) from a recipe.
-function build({ setup, moves, whiteFirst, resetPasses }) {
-  const b = new Board();
-  for (const [p, c] of setup) { b.toPlay = c; b.play(p); }
-  b.toPlay = whiteFirst ? WHITE : BLACK;
-  b.ko = 0; b.lastMove = PASS; b.lastMove2 = PASS; b.passes = 0; b.moveCount = 0;
-  const seen = new Set([b.hash]);
-  for (const m of moves) {
-    if (Array.isArray(m)) { b.toPlay = m[1]; b.play(m[0]); } else b.play(m);
-    seen.add(b.hash);
-  }
-  if (resetPasses) b.passes = 0;
-  return { board: b, seen };
-}
-
 self.onmessage = e => {
   const msg = e.data;
   if (msg.type === 'stop') { job = null; return; }
   if (msg.type === 'search') {
-    const { board, seen } = build(msg.position);
+    const { board, seen } = buildPosition(msg.position);
     const tmp = new Board();
     const forbidden = p => { tmp.copyFrom(board); tmp.play(p); return seen.has(tmp.hash); };
     job = {
