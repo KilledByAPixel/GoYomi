@@ -134,3 +134,23 @@ test('superko forbids repeating a position', () => {
   const set = g.hashesTo();
   assert.equal(set.size, 3);
 });
+
+test('handicap: White gets a point per handicap stone, in the count and for the engines', () => {
+  const g = new Game({ komi: 0.5, handicap: 3 });
+  assert.equal(g.handicapBonus, 3);
+  assert.equal(g.recipe().komi, 3.5);
+  const s = g.score();
+  // Only Black's 3 handicap stones on the board: black 81 by area, white 0.
+  assert.equal(s.bonus, 3);
+  assert.equal(s.margin, 81 - 0 - 0.5 - 3);
+  assert.equal(new Game({ komi: 7 }).handicapBonus, 0);
+  assert.equal(new Game({ komi: 7, setup: [[P('C3'), BLACK]] }).handicapBonus, 0, 'setups are not handicaps');
+});
+
+test('handicap compensation survives an SGF round trip', () => {
+  const g = new Game({ komi: 0.5, handicap: 2 });
+  const h = Game.fromSGF(g.toSGF());
+  assert.equal(h.handicapBonus, 2);
+  assert.equal(h.recipe().komi, 2.5);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]KM[0.5]HA[1]AB[ee])').handicapBonus, 0, 'HA below 2 is no handicap');
+});

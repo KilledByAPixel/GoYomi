@@ -33,8 +33,11 @@ export class Game {
   constructor({ komi = 7, handicap = 0, setup = null } = {}) {
     this.komi = komi;
     this.handicap = handicap;
+    // Chinese rules: White gets a point per handicap stone (setups aren't handicaps).
+    this.handicapBonus = 0;
     const board = new Board();
     const stones = setup ? [...setup] : (HANDICAP[handicap] || []).map(([x, y]) => [pt(x, y), BLACK]);
+    if (!setup) this.handicapBonus = stones.length;
     for (const [p, c] of stones) { board.toPlay = c; board.play(p); }
     // Handicap stones mean white moves first; explicit setups default to black.
     board.toPlay = stones.length && !setup ? WHITE : BLACK;
@@ -131,11 +134,11 @@ export class Game {
       const isEmptyNow = b.color[p] === EMPTY || dead.has(p);
       if (isEmptyNow) { if (owner[p] === BLACK) terrB++; else if (owner[p] === WHITE) terrW++; }
     }
-    const margin = black - white - this.komi;
+    const margin = black - white - this.komi - this.handicapBonus;
     const japB = terrB + b.captures[BLACK] + deadW;
     const japW = terrW + b.captures[WHITE] + deadB;
     return {
-      black, white, komi: this.komi, margin, owner,
+      black, white, komi: this.komi, bonus: this.handicapBonus, margin, owner,
       winner: margin > 0 ? BLACK : margin < 0 ? WHITE : 0,
       text: margin === 0 ? 'Draw (jigo)' : `${margin > 0 ? 'B' : 'W'}+${Math.abs(margin)}`,
       territory: { black: terrB, white: terrW, capturesB: b.captures[BLACK] + deadW, capturesW: b.captures[WHITE] + deadB,
@@ -150,7 +153,7 @@ export class Game {
     // After two passes the board counts as finished, and playouts from it would
     // end at once (nothing gets captured, so no stone ever looks dead). Reset
     // the pass counter so a search from a finished position plays it out.
-    return { setup: this.setup, whiteFirst: this.root.board.toPlay === WHITE, moves, komi: this.komi,
+    return { setup: this.setup, whiteFirst: this.root.board.toPlay === WHITE, moves, komi: this.komi + this.handicapBonus,
       resetPasses: node.board.passes >= 2 };
   }
 
@@ -241,6 +244,7 @@ export class Game {
     const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
     const game = new Game({ komi, setup: setup.length ? setup : [] });
     game.handicap = handicap;
+    game.handicapBonus = handicap >= 2 ? handicap : 0;
     const pl = rootProps.PL && rootProps.PL[0].toUpperCase();
     if (pl === 'W' || pl === 'B') game.root.board.toPlay = pl === 'W' ? WHITE : BLACK;
     else if (handicap && setup.length) game.root.board.toPlay = WHITE; // handicap: White moves first

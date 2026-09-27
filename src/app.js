@@ -587,7 +587,7 @@ function renderCoach() {
   $('#winB').style.width = `${(bw * 100).toFixed(1)}%`;
   $('#winLabelB').textContent = an ? `Black ${Math.round(bw * 100)}%` : 'Black';
   $('#winLabelW').textContent = an ? `${Math.round((1 - bw) * 100)}% White` : 'White';
-  $('#scoreEst').innerHTML = an && coachLevel() !== 'beginner' ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi})</span>` : '&nbsp;';
+  $('#scoreEst').innerHTML = an && coachLevel() !== 'beginner' ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi}${game.handicapBonus ? ` + ${game.handicapBonus} handicap` : ''})</span>` : '&nbsp;';
 
   // Feedback on the last two moves, so against the AI you see your own move's
   // grade as well as the reply.
@@ -731,8 +731,9 @@ function renderScorePanel() {
       <table class="score-table">
         <tr><th></th><th>Black</th><th>White</th></tr>
         <tr><td>Stones + surrounded area</td><td>${s.black}</td><td>${s.white}</td></tr>
-        <tr><td>Komi</td><td></td><td>${s.komi}</td></tr>
-        <tr class="total"><td>Total</td><td>${s.black}</td><td>${s.white + s.komi}</td></tr>
+        <tr><td>Komi</td><td></td><td>${s.komi}</td></tr>${s.bonus ? `
+        <tr><td>Handicap compensation</td><td></td><td>${s.bonus}</td></tr>` : ''}
+        <tr class="total"><td>Total</td><td>${s.black}</td><td>${s.white + s.komi + s.bonus}</td></tr>
       </table>
       <p class="muted">Area scoring (Chinese rules). Counting territory + prisoners instead (Japanese style) gives ${tm === 0 ? 'a draw' : (tm > 0 ? 'B+' : 'W+') + Math.abs(tm)}.</p>
       <p class="muted">Squares show who owns each point. Don't agree about a dead group? Click it to switch between dead and alive.</p>
