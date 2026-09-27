@@ -13,11 +13,40 @@ export function setSpeech(on) {
   if (!speaking && speechAvailable()) { speechSynthesis.cancel(); queue = []; current = null; }
 }
 
+// The nicest voice for the page's language: "Natural"/neural voices (Edge) and
+// Chrome's Google voices sound far better than the default system voice.
+// Returns null when no voice speaks the language (the browser default stays).
+export function pickVoice(voices, lang = 'en') {
+  const want = lang.toLowerCase(), base = want.split('-')[0];
+  const score = v => {
+    const l = (v.lang || '').toLowerCase().replace('_', '-');
+    if (l.split('-')[0] !== base) return -1;
+    return (l === want ? 2 : 1) + (/natural|neural/i.test(v.name) ? 8 : 0) + (/google/i.test(v.name) ? 4 : 0)
+      + (/online|enhanced|premium/i.test(v.name) ? 2 : 0) + (v.default ? 1 : 0);
+  };
+  let best = null, top = -1;
+  for (const v of voices) { const s = score(v); if (s > top) { best = v; top = s; } }
+  return best;
+}
+
+let voice; // undefined until the browser has listed its voices
+function bestVoice() {
+  if (voice === undefined) {
+    const list = speechSynthesis.getVoices ? speechSynthesis.getVoices() : [];
+    if (!list.length) return null; // still loading: try again next time
+    voice = pickVoice(list, (typeof navigator !== 'undefined' && navigator.language) || 'en');
+  }
+  return voice;
+}
+if (speechAvailable() && speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', () => { voice = undefined; });
+
 // Hands the synthesiser one utterance at a time, so the queue stays ours to edit.
 function next() {
   if (current || !queue.length) return;
   const item = current = queue.shift();
   const utt = new SpeechSynthesisUtterance(item.text);
+  const v = bestVoice();
+  if (v) { utt.voice = v; utt.lang = v.lang; }
   utt.onend = utt.onerror = () => { if (current === item) { current = null; next(); } };
   speechSynthesis.speak(utt);
 }
@@ -31,7 +60,8 @@ export function speak(text, cursor = false) {
     queue = queue.filter(x => !x.cursor);
     if (current && current.cursor) { current = null; speechSynthesis.cancel(); }
   }
-  queue.push({ text, cursor });
+  // A sentence at a time: Chrome's network voices stop after ~15 s of one utterance.
+  for (const s of text.split(/(?<=[.!?])\s+/)) if (s) queue.push({ text: s, cursor });
   next();
 }
 

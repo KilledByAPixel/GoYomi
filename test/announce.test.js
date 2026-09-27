@@ -59,3 +59,27 @@ test('speech: off by default; one utterance at a time; cursor readouts never pil
   assert.equal(texts().at(-1), 'AI played F5.');
   setSpeech(false);
 });
+
+test('pickVoice prefers natural-sounding voices in the page\'s language', async () => {
+  const { pickVoice } = await import('../src/announce.js');
+  const v = (name, lang, extra = {}) => ({ name, lang, ...extra });
+  const list = [v('Microsoft David - English (United States)', 'en-US', { default: true }), v('Google Deutsch', 'de-DE'),
+    v('Google US English', 'en-US'), v('Microsoft Aria Online (Natural) - English (United States)', 'en-US')];
+  assert.equal(pickVoice(list, 'en-US').name, 'Microsoft Aria Online (Natural) - English (United States)');
+  assert.equal(pickVoice(list.slice(0, 3), 'en-US').name, 'Google US English');
+  assert.equal(pickVoice([v('Google UK English Female', 'en-GB')], 'en-US').name, 'Google UK English Female', 'same language, other region');
+  assert.equal(pickVoice([v('Google Deutsch', 'de-DE')], 'en-US'), null, 'no voice in the language: leave the default');
+  assert.equal(pickVoice([], 'en-US'), null);
+});
+
+test('speech: long announcements are spoken a sentence at a time (Chrome cuts off long utterances)', () => {
+  spoken.length = 0;
+  speechSynthesis.speaking = false;
+  setSpeech(true);
+  announce('Coach: Good move. It claims the corner (worth about 3.5 points).');
+  assert.deepEqual(spoken.map(u => u.text), ['Coach: Good move.']);
+  speechSynthesis.speaking = true;
+  spoken.at(-1).onend();
+  assert.deepEqual(spoken.map(u => u.text), ['Coach: Good move.', 'It claims the corner (worth about 3.5 points).']);
+  setSpeech(false);
+});
