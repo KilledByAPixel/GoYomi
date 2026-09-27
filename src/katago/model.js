@@ -259,9 +259,14 @@ export class Net {
     const tf = this.tf;
     const s = tf.tensor4d(spatial.subarray(0, n * AREA * SPATIAL), [n, 9, 9, SPATIAL]);
     const g = tf.tensor2d(global.subarray(0, n * GLOBAL), [n, GLOBAL]);
-    const out = this.forward(s, g);
-    const data = await out.data();
-    tf.dispose([s, g, out]);
+    let out = null, data;
+    // Disposed however the run ends: a failing backend mustn't leak GPU memory too.
+    try {
+      out = this.forward(s, g);
+      data = await out.data();
+    } finally {
+      tf.dispose(out ? [s, g, out] : [s, g]);
+    }
     const w = AREA + 1 + 3 + this.scoreChannels + AREA, res = [];
     for (let i = 0; i < n; i++) res.push(this.decode(data.subarray(i * w, (i + 1) * w)));
     return res;

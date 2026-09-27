@@ -10,13 +10,14 @@ import { parseModel, Net } from './katago/model.js';
 import { Evaluator } from './katago/evaluator.js';
 import { KataSearch } from './katago/search.js';
 import { buildPosition } from './recipe.js';
+import { Scheduler } from './katago/scheduler.js';
+import { chooseBackend } from './katago/backends.js';
 
 const VENDOR = new URL('../vendor/', import.meta.url).href;
 const NET = new URL('../nets/b6c96.bin', import.meta.url).href;
 const BACKENDS = ['webgpu', 'webgl', 'wasm', 'cpu'];
 
-let evaluator = null, loading = null;
-const jobs = new Map();   // engine name -> job
+let loading = null;
 
 async function load(only) {
   const tf = await import(VENDOR + 'tf.js');
@@ -26,23 +27,22 @@ async function load(only) {
   const res = await fetch(NET);
   if (!res.ok) throw new Error(`network file: HTTP ${res.status}`);
   const parsed = parseModel(new Uint8Array(await res.arrayBuffer()));
-  let best = null;
-  for (const b of only ? [only] : BACKENDS) {
-    if (b === 'webgpu' && !(self.navigator && navigator.gpu)) continue;
-    let ok = false;
-    try { ok = await tf.setBackend(b); if (ok) await tf.ready(); } catch { ok = false; }
-    if (!ok) continue;
-    const gpu = b === 'webgpu' || b === 'webgl';
+  // Setting a backend up, building the net, warming up and benchmarking are one
+  // attempt: if any step fails, the next backend gets its turn.
+  const best = await chooseBackend(only ? [only] : BACKENDS, async b => {
+    if (b === 'webgpu' && !(self.navigator && navigator.gpu)) return null;
+    if (!await tf.setBackend(b)) return null;
+    await tf.ready();
+    const gpu = b === 'webgpu' || b === 'webgl', batch = gpu ? 16 : 4;
     const net = new Net(tf, parsed);
-    const rate = await benchmark(net, gpu ? 16 : 4);
-    if (!best || rate > best.rate) { if (best) best.net.dispose(); best = { backend: b, net, rate, batch: gpu ? 16 : 4 }; }
-    else net.dispose();
-    // A weak GPU can be slower than WASM on the CPU: then try that too.
-    if (!gpu || rate >= 150) break;
-  }
+    try {
+      const rate = await benchmark(net, batch);
+      return { backend: b, net, rate, batch, gpu, dispose: () => net.dispose() };
+    } catch (err) { net.dispose(); throw err; }
+  });
   if (!best) throw new Error('no TensorFlow.js backend works here');
-  await tf.setBackend(best.backend);
-  evaluator = new Evaluator(best.net, { maxBatch: best.batch });
+  if (!await tf.setBackend(best.backend)) throw new Error(`can't switch back to ${best.backend}`);
+  sched.evaluator = new Evaluator(best.net, { maxBatch: best.batch });
   return { backend: best.backend, rate: best.rate, batch: best.batch };
 }
 
@@ -57,6 +57,17 @@ async function benchmark(net, batch) {
   return (ev.evals - n0) / ((performance.now() - t0) / 1000);
 }
 
+// One reusable channel to yield between rounds (a new one per round would pile up ports).
+const channel = new MessageChannel();
+let wake = null;
+channel.port1.onmessage = () => { const w = wake; wake = null; if (w) w(); };
+const tick = () => new Promise(r => { wake = r; channel.port2.postMessage(0); });
+
+const sched = new Scheduler({ post: m => postMessage(m), yieldFn: tick });
+// Per engine, which request is current: a stop or a newer search cancels one
+// still waiting for the network to load.
+const current = new Map();
+
 self.onmessage = async e => {
   const msg = e.data;
   if (msg.type === 'load' || !loading) {
@@ -64,52 +75,20 @@ self.onmessage = async e => {
       info => { postMessage({ type: 'ready', ...info }); return true; },
       err => { postMessage({ type: 'failed', message: String(err && err.message || err) }); return false; });
   }
-  if (msg.type === 'stop') { jobs.delete(msg.engine); return; }
-  if (msg.type !== 'search') return;
-  jobs.delete(msg.engine);
+  if (msg.type !== 'stop' && msg.type !== 'search') return;
+  const req = {};
+  current.set(msg.engine, req);
+  sched.stop(msg.engine);
+  if (msg.type === 'stop') return;
   if (!await loading) { postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null }); return; }
-  const position = buildPosition(msg.position);
-  jobs.set(msg.engine, {
-    engine: msg.engine, id: msg.id,
-    search: new KataSearch(position, { komi: msg.position.komi, evaluator, batch: evaluator.maxBatch }),
+  if (current.get(msg.engine) !== req) return;   // stopped or replaced while loading
+  const ev = sched.evaluator;
+  sched.add({
+    engine: msg.engine, id: msg.id, priority: msg.priority || 0,
+    search: new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch }),
     target: msg.playouts || 100,
     maxTime: msg.maxTime || 60000,
     reportMs: msg.reportMs ?? 250,
     started: performance.now(), lastReport: 0,
   });
-  pump();
 };
-
-// One loop serves all jobs: each round, every job adds its share of leaves to
-// one batch; after the net runs, each gets its outputs back.
-let pumping = false;
-const tick = () => new Promise(r => { const c = new MessageChannel(); c.port1.onmessage = r; c.port2.postMessage(0); });
-async function pump() {
-  if (pumping) return;
-  pumping = true;
-  while (jobs.size) {
-    const live = [...jobs.values()];
-    const share = Math.max(1, Math.floor(evaluator.maxBatch / live.length));
-    const parts = live.map(j => ({ j, sels: j.search.gather(Math.min(share, j.target - j.search.playouts)) }));
-    const all = parts.flatMap(p => p.sels);
-    const outs = all.length ? await evaluator.evaluate(all.map(s => s.pos)) : [];
-    let at = 0;
-    const now = performance.now();
-    for (const { j, sels } of parts) {
-      const mine = outs.slice(at, at += sels.length);
-      if (jobs.get(j.engine) !== j) continue;   // stopped or replaced while the net ran
-      j.search.apply(sels, mine);
-      const done = j.search.playouts >= j.target || now - j.started > j.maxTime;
-      if (done || (j.reportMs && now - j.lastReport > j.reportMs)) {
-        j.lastReport = now;
-        const results = j.search.results(done ? 40 : 12);
-        results.engine = 'katago';
-        if (!done) delete results.allMoves;
-        postMessage({ type: done ? 'done' : 'progress', engine: j.engine, id: j.id, results, elapsed: now - j.started });
-      }
-      if (done) jobs.delete(j.engine);
-    }
-    await tick();   // let 'stop' and new searches in
-  }
-  pumping = false;
-}

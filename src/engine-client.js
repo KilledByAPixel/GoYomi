@@ -144,30 +144,53 @@ export const FULL_RATE = 150;
 
 // The one worker that runs the network for every KataGo engine.
 export class KataWorker {
-  constructor() {
+  // startupMs: how long loading may take (a stalled download or GPU set-up) before giving up.
+  constructor({ startupMs = 60000 } = {}) {
     this.worker = new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' });
     this.engines = new Map();
     this.info = null;
+    this.dead = false;       // failed: searches end at once
+    this.onFail = null;      // called when KataGo stops working after it had started
+    this.startupMs = startupMs;
     this.ready = new Promise(resolve => { this.resolveReady = resolve; });
     this.worker.onmessage = e => {
       const msg = e.data;
-      if (msg.type === 'ready' || msg.type === 'failed') {
-        this.info = msg.type === 'ready' ? { ok: true, backend: msg.backend, rate: msg.rate, batch: msg.batch }
-          : { ok: false, message: msg.message };
+      if (this.dead) return;   // a late message from a worker we've given up on
+      if (msg.type === 'ready') {
+        clearTimeout(this.timer);
+        this.info = { ok: true, backend: msg.backend, rate: msg.rate, batch: msg.batch };
         this.resolveReady(this.info);
         return;
       }
+      if (msg.type === 'failed' || msg.type === 'fatal') { this.fail(msg.message); return; }
       const eng = this.engines.get(msg.engine);
       if (eng) eng.onMessage(msg);
     };
-    this.worker.onerror = e => {
-      const message = e.message || 'failed to load';
-      if (!this.info) { this.info = { ok: false, message }; this.resolveReady(this.info); }
-      for (const eng of this.engines.values()) eng.fail();
-    };
+    this.worker.onerror = e => this.fail(e.message || 'failed to load');
   }
-  load(backend) { this.worker.postMessage({ type: 'load', backend }); return this.ready; }
-  post(msg) { this.worker.postMessage(msg); }
+
+  load(backend) {
+    if (!this.timer && !this.info) this.timer = setTimeout(() => this.fail('KataGo took too long to start'), this.startupMs);
+    this.worker.postMessage({ type: 'load', backend });
+    return this.ready;
+  }
+
+  // KataGo can't be used any more (it failed to load, timed out, crashed, or its
+  // network stopped working): end every search and stop the worker.
+  fail(message) {
+    if (this.dead) return;
+    const started = !!(this.info && this.info.ok);
+    this.dead = true;
+    clearTimeout(this.timer);
+    this.info = { ok: false, message };
+    this.resolveReady(this.info);
+    try { this.worker.terminate(); } catch { /* already gone */ }
+    for (const eng of this.engines.values()) eng.fail();
+    // A failed start is reported by load(); only a failure in play needs its own call.
+    if (started && this.onFail) this.onFail(message);
+  }
+
+  post(msg) { if (!this.dead) this.worker.postMessage(msg); }
 
   // Visits for a read worth `playouts` built-in playouts on this device.
   visits(playouts) {
@@ -180,9 +203,11 @@ export class KataWorker {
 // for a read worth that many built-in playouts (see KataWorker.visits); pass
 // `visits` to set the count directly. Results have playouts = visits.
 export class KataEngine {
-  constructor(name, host) {
+  // priority: searches with a higher one go first (the AI's move over coach reads).
+  constructor(name, host, { priority = 0 } = {}) {
     this.name = name;
     this.host = host;
+    this.priority = priority;
     this.nextId = 1;
     this.pending = null;
     host.engines.set(name, this);
@@ -190,10 +215,11 @@ export class KataEngine {
 
   search(position, { playouts = 10000, visits = 0, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
     this.cancel();
+    if (this.host.dead) return Promise.resolve(null);
     const id = this.nextId++;
     return new Promise(resolve => {
       this.pending = { id, resolve, onProgress };
-      this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), maxTime, reportMs });
+      this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), maxTime, reportMs, priority: this.priority });
     });
   }
 

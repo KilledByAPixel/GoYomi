@@ -115,7 +115,16 @@ function startKata() {
   if (kata.state !== 'off') return;
   kata.state = 'loading';
   kata.host = new KataWorker();
-  kata.opponent = new KataEngine('kopponent', kata.host);
+  // The AI's move outranks the coach's background reads on the shared network.
+  kata.opponent = new KataEngine('kopponent', kata.host, { priority: 1 });
+  kata.host.onFail = message => {
+    kata.state = 'failed';
+    kata.info = kata.host.info;
+    flash(`KataGo stopped working (${message}), so the coach uses the built-in engine.`);
+    useCoachEngine();
+    // A move KataGo was thinking about is played by the built-in engine instead.
+    if (aiNode) { cancelAI(); setTimeout(() => aiMove(), 0); }
+  };
   kata.coach = new KataPool('kcoach', COACHES, kata.host);
   kata.scout = new KataEngine('kscout', kata.host);
   kata.host.load().then(info => {
@@ -1232,6 +1241,8 @@ window.dojo = {
   get opponent() { return builtin.opponent; },
   // Which engine the coach uses, and how fast KataGo runs here.
   get katago() { return { state: kata.state, ...kata.info }; },
+  // Test hook: make KataGo fail as if its worker had crashed.
+  failKata: (message = 'test failure') => kata.host && kata.host.fail(message),
   // Test hooks: play by name ("E5"), pass, take back, start a game with options.
   play: name => onClick(POINTS.find(p => ptName(p) === name.toUpperCase())),
   pass: humanPass,

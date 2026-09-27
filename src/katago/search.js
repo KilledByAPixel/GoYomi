@@ -27,7 +27,7 @@ function flatStones(b, out = new Uint8Array(AREA)) {
   for (let i = 0; i < AREA; i++) out[i] = b.color[POINTS[i]];
   return out;
 }
-const snapshot = b => ({ stones: flatStones(b), ko: b.ko ? toFlat(b.ko) : -1 });
+const snapshot = b => ({ stones: flatStones(b), ko: b.ko ? toFlat(b.ko) : -1, hash: `${b.hashA},${b.hashB}` });
 
 class Node {
   constructor(move, prior) {
@@ -115,7 +115,10 @@ export class KataSearch {
     const { legal, banned } = this.legalMoves(b, hashes);
     const cur = snaps[snaps.length - 1];
     const tail = recent.slice(-6);
-    const key = `${b.hashA},${b.hashB},${b.toPlay},${cur.ko},${this.komi},${tail.map(m => m.move).join('.')}` +
+    // Everything the inputs depend on: the recent moves with their colours (history
+    // features) and the two boards before this one (ladder features), not just the stones.
+    const prev = snaps[snaps.length - 2], prevPrev = snaps[snaps.length - 3];
+    const key = `${b.hashA},${b.hashB},${b.toPlay},${cur.ko},${this.komi},${tail.map(m => m.move + ':' + m.color).join('.')},${prev ? prev.hash : ''},${prevPrev ? prevPrev.hash : ''}` +
       (banned.some(Boolean) ? ',' + banned.join('') : '');
     const pos = {
       stones: cur.stones, ko: cur.ko, pla: b.toPlay, recent: tail, komi: this.komi, banned,

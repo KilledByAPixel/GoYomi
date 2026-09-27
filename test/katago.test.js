@@ -110,3 +110,24 @@ test('search passes at the end of a finished game', async () => {
   assert.equal(r.moves[0].move, PASS);
   assert.ok(r.winrate > 0.95);
 });
+
+test('a failed network run leaves no tensors behind', async () => {
+  const { tf, net } = await loadNet();
+  const forward = net.forward;
+  const run = () => net.evaluate(new Float32Array(81 * SPATIAL), new Float32Array(GLOBAL), 1);
+  try {
+    const before = tf.memory().numTensors;
+    net.forward = () => { throw new Error('backend failed'); };
+    await assert.rejects(run(), /backend failed/);
+    assert.equal(tf.memory().numTensors, before, 'inputs disposed when the run fails');
+    net.forward = () => { const t = tf.zeros([1, 1]); t.data = () => Promise.reject(new Error('readback failed')); return t; };
+    await assert.rejects(run(), /readback failed/);
+    assert.equal(tf.memory().numTensors, before, 'inputs and outputs disposed when reading back fails');
+  } finally { net.forward = forward; }
+});
+
+test('the evaluation cache tells apart histories that differ only in who moved', () => {
+  const key = moves => new KataSearch(buildPosition({ setup: [], moves, whiteFirst: false }), { komi: 7, evaluator: null, batch: 1 }).gather(1)[0].pos.key;
+  const E5 = parsePt('E5');
+  assert.notEqual(key([[PASS, BLACK], [E5, WHITE]]), key([[PASS, WHITE], [E5, WHITE]]));
+});
