@@ -13,6 +13,7 @@
 // GoYomi moves exactly as the app's AI does: same search, playouts and move choice.
 import { spawn, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { BLACK, WHITE, PASS, ptName, parsePt } from '../src/board.js';
 import { Search, seed } from '../src/mcts.js';
 import { Game } from '../src/game.js';
@@ -20,7 +21,8 @@ import { LEVELS, chooseMove, shouldPass, estimateDead } from '../src/coach.js';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const opts = {
-  gnugo: arg('gnugo', 'gnugo'),
+  // An absolute path: Cygwin builds of GNU Go re-launch themselves by the path given and fail on a relative one.
+  gnugo: arg('gnugo') ? resolve(arg('gnugo')) : 'gnugo',
   level: +arg('level', 8) - 1,
   gnulevel: +arg('gnulevel', 10),
   games: +arg('games', 10),
@@ -38,7 +40,10 @@ class Gtp {
     this.waiting = [];
     this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', d => { this.buf += d.replace(/\r/g, ''); this.drain(); });
-    this.proc.on('error', e => { for (const w of this.waiting) w.reject(e); this.waiting = []; });
+    const fail = e => { for (const w of this.waiting) w.reject(e); this.waiting = []; };
+    this.proc.on('error', fail);
+    // If GNU Go dies, say so instead of leaving the game waiting (the worker would exit silently).
+    this.proc.on('exit', code => fail(new Error(`GNU Go exited (code ${code})`)));
   }
   drain() {
     let i;
