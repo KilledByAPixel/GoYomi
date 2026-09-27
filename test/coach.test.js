@@ -252,3 +252,10 @@ test('workKey: a node\'s own read, a check read and a pre-read of the same posit
   assert.notEqual(workKey({ kind: 'threat', node: w }), workKey({ kind: 'baseline', node: w }));
   assert.notEqual(workKey({ kind: 'root', node: g.root }), workKey({ kind: 'after', base: g.root, move: P('E5') }));
 });
+
+test('readRecipe: an after-read plays the child\'s colour when variations differ (imported SGFs)', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[cc])(;B[gg]))');
+  const ee = g.root.children[0], cc = ee.children.find(c => c.move === P('C7'));
+  assert.equal(cc.color, WHITE);
+  assert.deepEqual(readRecipe(g, { kind: 'after', base: ee, move: cc.move }), g.recipe(cc));
+});

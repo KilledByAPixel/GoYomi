@@ -501,14 +501,15 @@ function showBetter(node) {
   goTo(parent);
   const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
   better = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
-  const canClick = !aiColor() || resigned || parent.board.toPlay !== aiColor();
-  flash(`Coach's choice: ${ptName(g.bestMove)}. Numbered stones show how it expects play to go on. ${canClick ? 'Click to try it' : `Press "Try ${ptName(g.bestMove)} instead" to play it`}, or ▶ to go back.`);
+  const canClick = !resigned && (!aiColor() || parent.board.toPlay !== aiColor());
+  flash(`Coach's choice: ${ptName(g.bestMove)}. Numbered stones show how it expects play to go on. ${resigned ? 'Take back to keep playing' : canClick ? 'Click to try it' : `Press "Try ${ptName(g.bestMove)} instead" to play it`}, or ▶ to go back.`);
   render();
 }
 
 function tryInstead(node) {
   const g = node.grade;
   if (!g || !node.parent) return;
+  if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   goTo(node.parent);
   playMove(g.bestMove);
 }

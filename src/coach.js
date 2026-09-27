@@ -208,7 +208,9 @@ export function readRecipe(game, w) {
   if (w.kind === 'root') return game.recipe(w.node);
   if (w.kind === 'after') {
     const recipe = game.recipe(w.base);
-    recipe.moves = [...recipe.moves, [w.move, w.base.board.toPlay]];
+    // The child's own colour when it exists: imported SGFs can hold variations by either side.
+    const ch = w.base.children.find(c => c.move === w.move);
+    recipe.moves = [...recipe.moves, [w.move, ch ? ch.color : w.base.board.toPlay]];
     // A second pass ends the game: read it played out, as Game.recipe does.
     recipe.resetPasses = w.move === PASS && w.base.board.passes >= 1;
     return recipe;
