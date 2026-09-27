@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote } from '../src/wording.js';
 
 const P = parsePt;
 const KEYS = ['best', 'good', 'inaccuracy', 'mistake', 'blunder'];
@@ -35,4 +35,65 @@ test('verdict: numbers only above beginner level', () => {
   const small = { grade: 'inaccuracy', ptLoss: 2.5, wrLoss: 0.06, bestMove: P('D4') };
   assert.equal(verdict(small, 'improving', levelGrade(small, 'improving')), 'A fine move. The coach slightly preferred <b>D4</b>.');
   assert.equal(verdict({ grade: 'best', bestMove: P('D4') }, 'beginner', levelGrade({ grade: 'best' }, 'beginner')), 'Exactly the coach\'s choice.');
+});
+
+// The tester's G3 example as facts (see test/explain.test.js for how they arise).
+const G3_FACTS = [
+  { type: 'atari', double: false, stones: [P('G4')], trapped: null },
+  { type: 'threat', move: P('G5'), what: { type: 'capture', stones: [P('G4')], ko: false } },
+  { type: 'initiative', sente: true, reply: P('G5') },
+  { type: 'purpose', regions: [{ region: 7, kind: 'protects', points: 3.6 }], value: 8 },
+  { type: 'otherwise', move: P('G3') },
+];
+const ctx = (level, extra = {}) => ({ level, mover: BLACK, you: BLACK, shown: { key: 'good', flagged: false }, ...extra });
+
+test('describe: the G3 example at each level', () => {
+  assert.deepEqual(describe(G3_FACTS, ctx('beginner')), [
+    'Puts White\'s stone at G4 in atari: it has only 1 liberty left.',
+    'White has to save it.',
+    'After White answers, this guards the bottom of the board.',
+  ]);
+  assert.deepEqual(describe(G3_FACTS, ctx('improving')), [
+    'Threatens to capture White\'s stone at G4.',
+    'Once White answers at G5, it secures your lower side (worth about 8 points), and you get to play elsewhere next (sente).',
+    'Otherwise White would play G3.',
+  ]);
+  assert.deepEqual(describe(G3_FACTS, ctx('strong')), [
+    'Sente: threatens to capture White\'s stone at G4.',
+    'After G5 it secures your lower side (+8).',
+    'Otherwise White plays G3.',
+  ]);
+});
+
+test('describe: beginner lines never quote points or percentages', () => {
+  const all = [...G3_FACTS, { type: 'capture', stones: [P('A1'), P('B1')], ko: false }, { type: 'fewLibs', stones: 3 },
+    { type: 'losesStones', stones: [P('C3')] }, { type: 'initiative', sente: false, reply: P('J9') }];
+  for (const line of describe(all, ctx('beginner'))) assert.doesNotMatch(line, /point|%|≈|\+\d/);
+});
+
+test('describe: a lost stone is a sacrifice only when the move was good', () => {
+  const f = [{ type: 'stoneLost', stones: 1 }];
+  assert.match(describe(f, ctx('improving'))[0], /Sacrifices this stone/);
+  assert.match(describe(f, ctx('improving', { shown: { key: 'mistake', flagged: true } }))[0], /likely to be captured/);
+  assert.deepEqual(describe(f, ctx('improving', { shown: undefined })), [], 'not until the grade is known');
+});
+
+test('describe: attacks on dead stones are not praised', () => {
+  const f = [{ type: 'atari', double: false, stones: [P('D6'), P('E6')], trapped: 'net' }, { type: 'deadTarget', stones: [P('D6'), P('E6')] }];
+  const lines = describe(f, ctx('improving'));
+  assert.ok(!lines.some(l => /Atari/.test(l)), lines.join(' | '));
+  assert.match(lines.join(' '), /already dead/);
+  const taken = describe([{ type: 'capture', stones: [P('D6')], ko: false }, { type: 'deadTarget', stones: [P('D6')] }], ctx('improving'));
+  assert.deepEqual(taken, ['Captures 1 stone that was already dead.']);
+});
+
+test('describe: study mode names both colours', () => {
+  const lines = describe([{ type: 'atari', double: false, stones: [P('G4')], trapped: null }], { level: 'beginner', mover: BLACK, you: 0 });
+  assert.deepEqual(lines, ['Puts White\'s stone at G4 in atari: it has only 1 liberty left.']);
+});
+
+test('describeNote: AI moves get only the urgent facts', () => {
+  const f = [{ type: 'atari', double: false, stones: [P('C3'), P('C4')], trapped: null }, { type: 'shape', shape: 'extend' },
+    { type: 'capture', stones: [P('J1')], ko: false }];
+  assert.deepEqual(describeNote(f, { mover: WHITE, you: BLACK }), ['Your 2 stones at C3 are now in atari.', 'Captures your stone at J1.']);
 });
