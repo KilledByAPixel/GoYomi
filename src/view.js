@@ -34,8 +34,8 @@ export class BoardView {
     let coords = '';
     for (let i = 0; i < N; i++) {
       const a = M + i * CELL;
-      coords += `<text x="${a}" y="${M * 0.4}">${COLS[i]}</text><text x="${a}" y="${S - M * 0.4}">${COLS[i]}</text>`;
-      coords += `<text x="${M * 0.4}" y="${a}">${N - i}</text><text x="${S - M * 0.4}" y="${a}">${N - i}</text>`;
+      coords += `<text data-col="${i}" x="${a}" y="${M * 0.4}">${COLS[i]}</text><text data-col="${i}" x="${a}" y="${S - M * 0.4}">${COLS[i]}</text>`;
+      coords += `<text data-row="${i}" x="${M * 0.4}" y="${a}">${N - i}</text><text data-row="${i}" x="${S - M * 0.4}" y="${a}">${N - i}</text>`;
     }
     el.innerHTML = `
 <svg class="board-svg" viewBox="0 0 ${S} ${S}" role="application" tabindex="0" aria-label="Go board, 9 by 9. Arrow keys move the cursor, Enter plays.">
@@ -67,6 +67,8 @@ export class BoardView {
   <g class="l-cursor" pointer-events="none"></g>
 </svg>`;
     this.svg = el.querySelector('svg');
+    this.coordTexts = [...el.querySelectorAll('.coords text')];
+    this.coordPt = null;
     this.layers = {
       terr: el.querySelector('.l-terr'), stones: el.querySelector('.l-stones'), marks: el.querySelector('.l-marks'),
       hints: el.querySelector('.l-hints'), hover: el.querySelector('.l-hover'), cursor: el.querySelector('.l-cursor'),
@@ -269,5 +271,12 @@ export class BoardView {
       }
     }
     this.layers.hover.innerHTML = hov;
+
+    // The ghost stone's column letter and row number stand out on the edges.
+    const hp = h ? h.p : null;
+    if (hp !== this.coordPt) {
+      this.coordPt = hp;
+      for (const t of this.coordTexts) t.classList.toggle('on', hp !== null && (+t.dataset.col === ptX(hp) || +t.dataset.row === ptY(hp)));
+    }
   }
 }

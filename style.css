@@ -240,3 +240,5 @@ fieldset.row select, fieldset.row input { padding: 6px 8px; border-radius: 8px; 
 .level small { display: block; color: var(--muted); font-size: 12px; line-height: 1.3; margin-top: 2px; }
 menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 10px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.coords text { transition: font-size 0.12s, fill 0.12s; }
+.coords text.on { font-size: 40px; font-weight: 800; fill: #2b1a05; }
