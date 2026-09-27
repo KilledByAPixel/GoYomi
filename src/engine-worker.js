@@ -8,7 +8,10 @@ seed((Math.random() * 0xffffffff) >>> 0);
 
 const channel = new MessageChannel();
 channel.port1.onmessage = step;
-const yieldThen = () => channel.port2.postMessage(0);
+// At most one step in flight: a new job picks up a step already queued, so a
+// stale step can't start a second loop on it.
+let stepQueued = false;
+const yieldThen = () => { if (!stepQueued) { stepQueued = true; channel.port2.postMessage(0); } };
 
 // Rebuild the position (and superko history) from a recipe.
 function build({ setup, moves, whiteFirst, resetPasses }) {
@@ -47,6 +50,7 @@ self.onmessage = e => {
 };
 
 function step() {
+  stepQueued = false;
   if (!job) return;
   const j = job;
   j.search.run(Math.min(j.chunk, j.target - j.search.playouts));

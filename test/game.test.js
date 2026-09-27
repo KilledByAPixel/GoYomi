@@ -112,6 +112,20 @@ test('SGF round trip keeps moves, variations and comments', () => {
   assert.equal(h.toSGF({ result: 'B+R' }), sgf);
 });
 
+test('SGF soft line breaks are removed; escaped ] and \\ still round-trip', () => {
+  for (const nl of ['\n', '\r', '\r\n', '\n\r']) {
+    const h = Game.fromSGF(`(;GM[1]SZ[9];B[ee]C[line1\\${nl}line2])`);
+    assert.equal(h.root.children[0].comment, 'line1line2', JSON.stringify(nl));
+  }
+  // Only the newline straight after the backslash goes; a hard break stays.
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9];B[ee]C[a\\\n\nb])').root.children[0].comment, 'a\nb');
+  const g = new Game();
+  g.play(pt(4, 4));
+  g.current.comment = 'a]b\\\nc\\';
+  const h = Game.fromSGF(g.toSGF());
+  assert.equal(h.root.children[0].comment, 'a]b\\\nc\\');
+});
+
 test('SGF import follows the main (first) variation', () => {
   const h = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[cc];B[gg])(;W[gc]))');
   const line = h.line(h.root);

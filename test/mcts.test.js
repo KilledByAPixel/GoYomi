@@ -66,6 +66,46 @@ test('ownership reflects a clearly won area', () => {
   assert.ok(r.blackWinrate > 0.6, `black winrate ${r.blackWinrate}`);
 });
 
+// Finished position: the white stone at B5 is dead inside Black's area.
+// Counted with it removed: B+2 at komi 7 (as the board stands: W+1).
+const deadStoneRows = [
+  'XXXXXOOOO',
+  'XX.XXOO.O',
+  'XXXXXOOOO',
+  'XXXXXOOOO',
+  '.OXXXOO.O',
+  'XXXXXOOOO',
+  'XXXXXOOOO',
+  'XX.XXOO.O',
+  'XXXXXOOOO',
+];
+
+test('two passes in the tree are counted with dead stones removed', () => {
+  seed(11);
+  const b = Board.fromRows(deadStoneRows, BLACK);
+  b.play(PASS); // White can only pass back, ending the game in the tree
+  const s = new Search(b, { komi: 7 });
+  s.run(1000);
+  const r = s.results();
+  assert.ok(r.winrate < 0.05, `White winrate ${r.winrate} after Black's harmless pass`);
+  assert.equal(r.score, 2);
+  assert.ok(r.ownership[POINTS.indexOf(pt(1, 4))] > 0.9, 'dead B5 is Black\'s');
+});
+
+test('a finished board leaves dame neutral', () => {
+  seed(12);
+  const rows = [...deadStoneRows];
+  rows[8] = 'XXXX.OOOO'; // E1 is dame: B+0.5 at komi 7.5, whoever would reach it first
+  const b = Board.fromRows(rows, BLACK);
+  b.play(PASS); b.play(PASS);
+  const s = new Search(b, { komi: 7.5 });
+  s.run(500);
+  const r = s.results();
+  assert.equal(r.blackWinrate, 1);
+  assert.equal(r.score, 0.5);
+  assert.equal(r.ownership[POINTS.indexOf(pt(4, 8))], 0);
+});
+
 test('symmetric root moves are searched once, with their twins listed', () => {
   seed(3);
   const s = new Search(new Board(), { komi: 7 });

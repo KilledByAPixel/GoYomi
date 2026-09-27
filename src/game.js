@@ -201,7 +201,19 @@ export class Game {
         while (text[i] === '[') {
           i++;
           let v = '';
-          while (i < text.length && text[i] !== ']') { if (text[i] === '\\') i++; v += text[i++]; }
+          while (i < text.length && text[i] !== ']') {
+            if (text[i] === '\\') {
+              i++;
+              // Backslash + newline (\n, \r, \r\n or \n\r) is a soft line break: drop both.
+              const nl = text[i];
+              if (nl === '\n' || nl === '\r') {
+                i++;
+                if ((text[i] === '\n' || text[i] === '\r') && text[i] !== nl) i++;
+                continue;
+              }
+            }
+            v += text[i++];
+          }
           i++;
           vals.push(v);
           ws();

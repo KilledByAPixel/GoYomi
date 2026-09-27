@@ -283,10 +283,22 @@ function principalVariation(node, max = 8) {
   return out;
 }
 
-// Tromp-Taylor area score of a finished board (black minus white, no komi);
-// fills owner like playout() does.
-function terminalScore(b, owner) {
-  const a = b.areaScore();
+// Score of a board both players passed on, counted like the game's final
+// count: play a copy out to see which stones die, then count the board as it
+// stands with those removed (area, black minus white, no komi). Counting the
+// played-out copy would hand each dame to whoever reached it first.
+// Fills owner like playout() does.
+const deadList = [];
+function finalScore(b, copy, amaf, owner) {
+  copy.copyFrom(b);
+  copy.passes = 0;
+  playout(copy, amaf, owner);
+  deadList.length = 0;
+  for (let i = 0; i < POINTS.length; i++) {
+    const p = POINTS[i];
+    if (b.color[p] !== EMPTY && copy.color[p] !== b.color[p]) deadList.push(p);
+  }
+  const a = b.areaScore(deadList);
   for (let i = 0; i < POINTS.length; i++) {
     const o = a.owner[POINTS[i]];
     owner[i] = o === BLACK ? 1 : o === WHITE ? -1 : 0;
@@ -322,6 +334,7 @@ export class Search {
     this.komi = opts.komi ?? 7;
     this.forbidden = opts.forbidden || null;
     this.work = new Board();
+    this.final = new Board();
     this.amaf = new Uint8Array(SIZE);
     this.owner = new Int8Array(POINTS.length);
     this.ownerSum = new Float64Array(POINTS.length);
@@ -364,10 +377,8 @@ export class Search {
         path.push(node);
         if (!node.children && node.n >= P.expandVisits && b.passes < 2) expand(node, b, null);
       }
-      // Two passes inside the tree end the game as it stands: count it by area.
-      // (playoutScore is only right for played-out boards where every empty
-      // point is an eye; on a real position it misses most territory.)
-      const raw = b.passes >= 2 ? terminalScore(b, this.owner) : playout(b, amaf, this.owner);
+      // Two passes inside the tree end the game: count it with dead stones off.
+      const raw = b.passes >= 2 ? finalScore(b, this.final, amaf, this.owner) : playout(b, amaf, this.owner);
       const score = raw - this.komi;
       const winner = score > 0 ? BLACK : score < 0 ? WHITE : 0;
       this.playouts++;
