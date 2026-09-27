@@ -4,7 +4,7 @@ import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
 import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, gradesMove, GRADES, threats, describeScore } from './coach.js';
-import { boardFacts, moveFacts } from './explain.js';
+import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote } from './wording.js';
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
@@ -359,7 +359,7 @@ function tryGrade(node) {
 }
 
 // What the coach knows about node's move so far (explain.js), from whatever
-// reads are done. Cached until another read arrives.
+// reads are done. Cached until one of those reads changes.
 function factsFor(node) {
   const p = node.parent;
   const reads = {
@@ -368,10 +368,7 @@ function factsFor(node) {
     threat: node.reads && node.reads.threat,
     baseline: node.reads && node.reads.baseline,
   };
-  const key = ['before', 'after', 'threat', 'baseline'].map(k => reads[k] ? 1 : 0).join('');
-  if (node.facts && node.factsKey === key) return node.facts;
-  node.factsKey = key;
-  return node.facts = moveFacts({ before: p.board, after: node.board, move: node.move, reads });
+  return cachedFacts(node, reads);
 }
 
 let analysisRenderPending = false;

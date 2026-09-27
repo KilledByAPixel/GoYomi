@@ -203,3 +203,12 @@ export function moveFacts({ before, after, move, reads = {} }) {
   if (dead && threat && sente && threat.what.stones && threat.what.stones.some(p => dead.stones.includes(p))) return all.filter(f => f !== dead);
   return all;
 }
+
+// moveFacts for a game-tree node, cached until one of the reads it used is
+// replaced (a deeper re-read after a Coach depth change is a new object).
+export function cachedFacts(node, reads) {
+  const used = [reads.before, reads.after, reads.threat, reads.baseline];
+  if (node.facts && node.factsReads && used.every((r, i) => r === node.factsReads[i])) return node.facts;
+  node.factsReads = used;
+  return node.facts = moveFacts({ before: node.parent.board, after: node.board, move: node.move, reads });
+}

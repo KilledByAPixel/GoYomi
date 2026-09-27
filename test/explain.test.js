@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, parsePt, ptName } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { boardFacts, moveFacts, threatFacts, purposeFacts, regionOf } from '../src/explain.js';
+import { boardFacts, moveFacts, threatFacts, purposeFacts, regionOf, cachedFacts } from '../src/explain.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -197,4 +197,16 @@ test('no sente when the answer is where the opponent wanted to play anyway', () 
   const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
   const reads = { ...g3Reads(), baseline: read(WHITE, { score: -10, moves: [['G5']] }) };
   assert.equal(threatFacts(after, P('G3'), BLACK, reads).find(f => f.type === 'initiative').sente, false);
+});
+
+test('cachedFacts recomputes when any read is replaced, even by one of the same kind', () => {
+  const before = Board.fromRows(SPLIT, BLACK);
+  const node = { parent: { board: before }, board: played(before, 'E5'), move: P('E5') };
+  const dies = read(WHITE, { own: { E5: -0.9 }, moves: [['E4', 0, ['J1', 'E6']]] });
+  const lives = read(WHITE, { own: { E5: 0.8 }, moves: [['E6', 0, ['E4']]] });
+  const a = cachedFacts(node, { after: dies });
+  assert.equal(cachedFacts(node, { after: dies }), a, 'same reads: cached');
+  const b = cachedFacts(node, { after: lives });
+  assert.notEqual(b, a);
+  assert.ok(types(b).includes('cut') && !types(a).includes('cut'));
 });
