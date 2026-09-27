@@ -196,17 +196,28 @@ export function preferUsefulMove(an) {
   return an;
 }
 
-// The position a coach read looks at, as a Game recipe, for node's move:
-// 'pos' node's position; 'check' the parent position after `move` (to check
-// node's grade against); 'threat' node's position with the opponent passing;
-// 'baseline' the parent position with the mover passing (explain.js).
-export function readRecipe(game, node, kind, move) {
-  if (kind === 'pos') return game.recipe(node);
-  const recipe = game.recipe(kind === 'threat' ? node : node.parent);
-  const extra = kind === 'check' ? [move, node.color] : [PASS, kind === 'threat' ? 3 - node.color : node.color];
-  recipe.moves = [...recipe.moves, extra];
+// Coach work items: { kind: 'root', node } reads the root position;
+// { kind: 'after', base, move } the position after `move` from `base` (a
+// node's own read, a check read and a pre-read are all this, and share one
+// key); { kind: 'threat' | 'baseline', node } node's position with the
+// opponent passing, or its parent's with the mover passing (explain.js).
+export const workKey = w => w.kind === 'after' ? `${w.base.id}:after:${w.move}` : `${w.node.id}:${w.kind}`;
+
+// The position a work item reads, as a Game recipe.
+export function readRecipe(game, w) {
+  if (w.kind === 'root') return game.recipe(w.node);
+  if (w.kind === 'after') {
+    const recipe = game.recipe(w.base);
+    recipe.moves = [...recipe.moves, [w.move, w.base.board.toPlay]];
+    // A second pass ends the game: read it played out, as Game.recipe does.
+    recipe.resetPasses = w.move === PASS && w.base.board.passes >= 1;
+    return recipe;
+  }
+  const node = w.node;
+  const recipe = game.recipe(w.kind === 'threat' ? node : node.parent);
+  recipe.moves = [...recipe.moves, [PASS, w.kind === 'threat' ? 3 - node.color : node.color]];
   // An imagined pass must not end the game after a real one.
-  if (kind !== 'check') recipe.resetPasses = true;
+  recipe.resetPasses = true;
   return recipe;
 }
 

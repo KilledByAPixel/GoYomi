@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -206,28 +206,6 @@ test('preferUsefulMove: a move inside settled territory gives way to an equal re
   assert.equal(preferUsefulMove(white).moves[0].move, P('E5'));
 });
 
-test('readRecipe: pass reads add the pass for the right side and never end the game', () => {
-  const g = new Game({ handicap: 2 }); // white moves first
-  g.play(P('E5')); // white
-  const b = g.play(P('D3')); // black (C3 and G7 hold the handicap stones)
-  const threat = readRecipe(g, b, 'threat');
-  assert.deepEqual(threat.moves.at(-1), [PASS, WHITE]);
-  assert.equal(threat.moves.length, 3);
-  assert.equal(threat.resetPasses, true);
-  const base = readRecipe(g, b, 'baseline');
-  assert.deepEqual(base.moves.at(-1), [PASS, BLACK]);
-  assert.equal(base.moves.length, 2);
-  assert.equal(base.resetPasses, true);
-  const check = readRecipe(g, b, 'check', P('D4'));
-  assert.deepEqual(check.moves.at(-1), [P('D4'), BLACK]);
-  assert.equal(check.resetPasses, false);
-  assert.deepEqual(readRecipe(g, b, 'pos'), g.recipe(b));
-  // Right after a real pass, the imagined one still resets the pass count.
-  const p = g.play(PASS), m = g.play(P('F6'));
-  assert.equal(readRecipe(g, m, 'baseline').resetPasses, true);
-  assert.equal(readRecipe(g, p, 'threat').resetPasses, true);
-});
-
 test('gradesMove: the player\'s moves, and AI moves only when asked', () => {
   const g = new Game();
   const b = g.play(P('E5')), w = g.play(P('C3'));
@@ -236,4 +214,41 @@ test('gradesMove: the player\'s moves, and AI moves only when asked', () => {
   assert.equal(gradesMove(w, BLACK, true), true);
   assert.equal(gradesMove(w, 0, false), true, 'study mode: both colours');
   assert.equal(gradesMove(g.root, BLACK, true), false);
+});
+
+test('readRecipe: an after-read is the same position as the child it is for', () => {
+  const g = new Game({ handicap: 2 }); // white moves first; C3 and G7 hold the handicap stones
+  const w = g.play(P('E5')), b = g.play(P('D3'));
+  assert.deepEqual(readRecipe(g, { kind: 'after', base: w, move: P('D3') }), g.recipe(b));
+  assert.deepEqual(readRecipe(g, { kind: 'root', node: b }), g.recipe(b));
+  // After a real pass, reading the position after a second pass is a finished game: played out.
+  const p = g.play(PASS), pp = g.play(PASS);
+  assert.deepEqual(readRecipe(g, { kind: 'after', base: p, move: PASS }), g.recipe(pp));
+});
+
+test('readRecipe: threat and baseline reads add a pass for the right side and never end the game', () => {
+  const g = new Game({ handicap: 2 });
+  g.play(P('E5'));
+  const b = g.play(P('D3'));
+  const threat = readRecipe(g, { kind: 'threat', node: b });
+  assert.deepEqual(threat.moves.at(-1), [PASS, WHITE]);
+  assert.equal(threat.moves.length, 3);
+  assert.equal(threat.resetPasses, true);
+  const base = readRecipe(g, { kind: 'baseline', node: b });
+  assert.deepEqual(base.moves.at(-1), [PASS, BLACK]);
+  assert.equal(base.moves.length, 2);
+  assert.equal(base.resetPasses, true);
+  const p = g.play(PASS), m = g.play(P('F6'));
+  assert.equal(readRecipe(g, { kind: 'baseline', node: m }).resetPasses, true);
+  assert.equal(readRecipe(g, { kind: 'threat', node: p }).resetPasses, true);
+});
+
+test('workKey: a node\'s own read, a check read and a pre-read of the same position share one key', () => {
+  const g = new Game();
+  const b = g.play(P('E5')), w = g.play(P('C3'));
+  const own = workKey({ kind: 'after', base: b, move: P('C3') });
+  assert.equal(own, workKey({ kind: 'after', base: w.parent, move: w.move }));
+  assert.notEqual(own, workKey({ kind: 'after', base: b, move: P('D4') }));
+  assert.notEqual(workKey({ kind: 'threat', node: w }), workKey({ kind: 'baseline', node: w }));
+  assert.notEqual(workKey({ kind: 'root', node: g.root }), workKey({ kind: 'after', base: g.root, move: P('E5') }));
 });
