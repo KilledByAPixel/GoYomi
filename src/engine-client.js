@@ -92,23 +92,27 @@ export class EnginePool {
   search(position, { playouts = 10000, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
     this.cancel();
     const id = this.nextId++, n = this.engines.length;
-    const latest = new Array(n).fill(null), done = new Array(n).fill(false);
+    const latest = new Array(n).fill(null);
     return new Promise(resolve => {
       this.pending = { id, resolve };
-      this.engines.forEach((engine, i) => {
-        engine.search(position, {
-          playouts: Math.ceil(playouts / n), maxTime, reportMs,
-          onProgress: (res, fin) => {
-            if (!this.pending || this.pending.id !== id) return;
-            latest[i] = res;
-            if (fin) done[i] = true;
-            const finished = done.every(Boolean);
-            if (!finished && !onProgress) return;
-            const merged = mergeResults(latest.filter(Boolean));
-            if (onProgress) onProgress(merged, finished);
-            if (finished) { this.pending = null; resolve(merged); }
-          },
-        });
+      const live = () => this.pending && this.pending.id === id;
+      const runs = this.engines.map((engine, i) => engine.search(position, {
+        playouts: Math.ceil(playouts / n), maxTime, reportMs,
+        onProgress: (res, fin) => {
+          if (!live() || fin) return;
+          latest[i] = res;
+          if (onProgress) onProgress(mergeResults(latest.filter(Boolean)), false);
+        },
+      }));
+      // Settle once every engine has finished, failed or been cancelled: a
+      // worker that dies must not leave the pool waiting forever.
+      Promise.all(runs).then(results => {
+        if (!live()) return;
+        this.pending = null;
+        const ok = results.filter(Boolean);
+        const merged = ok.length ? mergeResults(ok) : null;
+        if (merged && onProgress) onProgress(merged, true);
+        resolve(merged);
       });
     });
   }

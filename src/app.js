@@ -453,6 +453,7 @@ async function enterScoring() {
   }
   if (!scoring || scoring.node !== node) return;
   scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
+  if (!an) flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
   node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
   playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
