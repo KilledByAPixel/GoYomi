@@ -22,7 +22,7 @@ function woodGrain() {
 const ink = c => c === BLACK ? '#f5f3ee' : '#1c1a17';
 
 export class BoardView {
-  constructor(el, { onClick, onHover }) {
+  constructor(el, { onClick, onHover, onCursor }) {
     this.el = el;
     let grid = '';
     for (let i = 0; i < N; i++) {
@@ -38,7 +38,7 @@ export class BoardView {
       coords += `<text x="${M * 0.4}" y="${a}">${N - i}</text><text x="${S - M * 0.4}" y="${a}">${N - i}</text>`;
     }
     el.innerHTML = `
-<svg class="board-svg" viewBox="0 0 ${S} ${S}" role="img" aria-label="Go board">
+<svg class="board-svg" viewBox="0 0 ${S} ${S}" role="application" tabindex="0" aria-label="Go board, 9 by 9. Arrow keys move the cursor, Enter plays.">
   <defs>
     <linearGradient id="gWood" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#e8c178"/><stop offset="0.5" stop-color="#dcb066"/><stop offset="1" stop-color="#cf9f55"/>
@@ -64,11 +64,12 @@ export class BoardView {
   <g class="l-marks"></g>
   <g class="l-hints"></g>
   <g class="l-hover" pointer-events="none"></g>
+  <g class="l-cursor" pointer-events="none"></g>
 </svg>`;
     this.svg = el.querySelector('svg');
     this.layers = {
       terr: el.querySelector('.l-terr'), stones: el.querySelector('.l-stones'), marks: el.querySelector('.l-marks'),
-      hints: el.querySelector('.l-hints'), hover: el.querySelector('.l-hover'),
+      hints: el.querySelector('.l-hints'), hover: el.querySelector('.l-hover'), cursor: el.querySelector('.l-cursor'),
     };
     this.animId = null;
     this.hoverPt = null;
@@ -87,9 +88,45 @@ export class BoardView {
     });
     this.svg.addEventListener('pointerleave', () => { this.hoverPt = null; onHover(null); });
     this.svg.addEventListener('click', e => { const p = pointAt(e); if (p !== null) onClick(p); });
+    this.onHover = onHover;
+    this.onCursor = onCursor;
+    this.cursor = null;
+    this.focused = false;
+    this.last = null; // the last render state
+    // Mouse clicks shouldn't take keyboard focus: arrows keep stepping through the game.
+    this.svg.addEventListener('mousedown', e => e.preventDefault());
+    this.svg.addEventListener('focus', () => {
+      this.focused = true;
+      if (this.cursor === null) this.cursor = this.last && this.last.lastMove != null && this.last.lastMove !== PASS ? this.last.lastMove : pt(4, 4);
+      this.moveCursor(0, 0);
+    });
+    this.svg.addEventListener('blur', () => { this.focused = false; this.drawCursor(); onHover(null); });
+    this.svg.addEventListener('keydown', e => {
+      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      if (d) this.moveCursor(d[0], d[1]);
+      else if ((e.key === 'Enter' || e.key === ' ') && this.cursor !== null) onClick(this.cursor);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
+
+  moveCursor(dx, dy) {
+    const x = Math.max(0, Math.min(N - 1, ptX(this.cursor) + dx)), y = Math.max(0, Math.min(N - 1, ptY(this.cursor) + dy));
+    this.cursor = pt(x, y);
+    this.drawCursor();
+    this.onHover(this.cursor); // the same preview a mouse gets
+    if (this.onCursor) this.onCursor(this.cursor);
+  }
+
+  drawCursor() {
+    const p = this.cursor;
+    this.layers.cursor.innerHTML = this.focused && p !== null
+      ? `<rect x="${X(p) - 50}" y="${Y(p) - 50}" width="100" height="100" rx="14" fill="none" stroke="${BLUE}" stroke-width="8"/>` : '';
   }
 
   render(s) {
+    this.last = s;
     const b = s.board;
     const animate = s.nodeId !== this.animId;
     this.animId = s.nodeId;

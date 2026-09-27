@@ -7,7 +7,8 @@ import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, 
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
-import { linkPoints } from './access.js';
+import { linkPoints, pointReadout, movePhrase, plainText } from './access.js';
+import { initAnnouncer, announce, speak, setSpeech, repeatLast, speechAvailable } from './announce.js';
 import { renderGraph } from './graph.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
@@ -35,6 +36,7 @@ const DEFAULTS = {
   coachPlayouts: 48000,
   gradeAI: false,
   coachFor: 'auto',
+  speak: false,
   sound: true,
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
@@ -61,7 +63,12 @@ const coach = new EnginePool('coach', Math.max(1, Math.min(4, (navigator.hardwar
 // Answers "what would the opponent play if I passed?"
 const scout = new Engine('scout');
 Engine.onError = (name, msg) => flash(`The ${name} engine stopped working (${msg}). Reload the page; if it keeps happening, try a current Chrome, Firefox or Safari.`, 'bad');
-const view = new BoardView($('#board'), { onClick, onHover });
+const view = new BoardView($('#board'), { onClick, onHover, onCursor });
+
+// The keyboard cursor moved: say what's there.
+function onCursor(p) {
+  announce(pointReadout(game.current.board, p, q => game.check(q)), { cursor: true });
+}
 
 // ------------------------------------------------------------------ helpers
 
@@ -84,6 +91,7 @@ function flash(text, kind = '') {
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { flashMsg = null; renderStatus(); }, 5000);
   renderStatus();
+  speak(text);
 }
 
 function pvStones(color, moves) {
@@ -114,6 +122,9 @@ function playMove(move) {
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   const node = game.play(move);
+  // Say the move; for ungraded (AI) moves add what the player must react to.
+  const note = isGraded(node) ? [] : describeNote(factsFor(node).filter(f => f.type !== 'capture'), { mover: node.color, you: settings.human });
+  announce([movePhrase(who(node.color), move, node.captured.length), ...note].join(' '));
   hintOn = false; better = null;
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
@@ -408,6 +419,17 @@ function tryGrade(node) {
   }
   node.checkMove = null;
   node.grade = g;
+  announceGrade(node);
+}
+
+// The coach's verdict on a move on screen, spoken once.
+function announceGrade(node) {
+  const cur = game.current;
+  if (node.announced || node.move === PASS || !settings.show.feedback || (node !== cur && node !== cur.parent)) return;
+  node.announced = true;
+  const level = coachLevel(), facts = factsFor(node), shown = levelGrade(node.grade, level, facts);
+  const lines = describe(facts, { level, mover: node.color, you: settings.human, shown });
+  announce(plainText(`Coach: ${shown.label}. ${verdict(node.grade, level, shown)} ${lines.join(' ')}`));
 }
 
 // What the coach knows about node's move so far (explain.js), from whatever
@@ -459,6 +481,8 @@ async function enterScoring() {
   node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
   save();
+  const s0 = game.score(scoring.dead, node);
+  announce(s0.winner ? `Game over. ${colorName(s0.winner)} wins by ${Math.abs(s0.margin)} points.` : 'Game over. A draw.');
   playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
   render();
   $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
@@ -876,6 +900,7 @@ function load() {
     settings.coachPlayouts = { 8000: 16000, 24000: 48000, 80000: 120000 }[settings.coachPlayouts] || settings.coachPlayouts;
     if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     settings.gradeAI = !!settings.gradeAI;
+    settings.speak = !!settings.speak;
     if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
     if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
@@ -960,6 +985,7 @@ function syncOptions() {
   $('#optCoach').value = String(settings.coachPlayouts);
   $('#optCoachFor').value = settings.coachFor;
   $('#optGradeAI').checked = settings.gradeAI;
+  $('#optSpeak').checked = settings.speak;
   $('#optSound').checked = settings.sound;
   $('#toggles').querySelectorAll('input').forEach(i => { i.checked = !!settings.show[i.dataset.key]; });
 }
@@ -994,6 +1020,8 @@ function setupControls() {
     save(); render(); scheduleCoach();
   };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
+  $('#optSpeak').onchange = e => { settings.speak = e.target.checked; setSpeech(settings.speak); save(); announce(settings.speak ? 'Speech on.' : 'Speech off.'); };
+  if (!speechAvailable()) { $('#optSpeak').disabled = true; $('#speakNote').hidden = false; }
   // Hovering (or focusing) a point the coach mentions circles it on the board.
   const locate = p => { if (p !== locatePt) { locatePt = p; renderBoard(); } };
   const ptOf = el => { const t = el && el.closest ? el.closest('[data-pt]') : null; return t ? +t.dataset.pt : null; };
@@ -1038,6 +1066,10 @@ function setupControls() {
     else if (e.key === 'ArrowRight') nav('next');
     else if (e.key === 'Home') nav('first');
     else if (e.key === 'End') nav('last');
+    else if (e.key === 'PageUp') nav('prev');
+    else if (e.key === 'PageDown') nav('next');
+    else if (k === 's') { if (!$('#optSpeak').disabled) $('#optSpeak').click(); }
+    else if (k === 'r') repeatLast();
     else if (k === 'u' || e.key === 'Backspace') takeBack();
     else if (k === 'h') $('#btnHint').click();
     else if (k === 'o') toggleThreat();
@@ -1054,10 +1086,12 @@ function setupControls() {
 
 // ------------------------------------------------------------------ boot
 
+initAnnouncer($('#announcer'));
 setupControls();
 setupDialog();
 if (!load()) game = new Game({ komi: settings.komi, handicap: settings.handicap });
 setSoundEnabled(settings.sound);
+setSpeech(settings.speak);
 syncOptions();
 afterChange();
 if (restoreScoring && restoreScoring === game.current) enterScoring();

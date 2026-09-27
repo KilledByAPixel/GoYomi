@@ -47,6 +47,7 @@
     <div id="board" class="board-wrap"></div>
 
     <div id="message" class="message" role="status" aria-live="polite"></div>
+    <div id="announcer" class="sr-only" aria-live="polite"></div>
 
     <div class="controls">
       <button id="btnPass" title="Pass (P)">Pass</button>
@@ -115,6 +116,8 @@
         <small class="muted help">Changes what the coach says, not how the AI plays.</small>
         <label class="inline"><input type="checkbox" id="optGradeAI"> Grade AI moves</label>
         <label class="inline"><input type="checkbox" id="optSound"> Sound</label>
+        <label class="inline"><input type="checkbox" id="optSpeak"> Speak announcements</label>
+        <small class="muted help" id="speakNote" hidden>Speech isn't available in this browser.</small>
         <div class="row">
           <button id="btnExport">Save SGF</button>
           <button id="btnImport">Load SGF</button>
@@ -154,7 +157,7 @@
       <details>
         <summary>Keyboard</summary>
         <p><kbd>←</kbd>/<kbd>→</kbd> step · <kbd>Home</kbd>/<kbd>End</kbd> start/latest · <kbd>U</kbd> take back · <kbd>H</kbd> hint · <kbd>O</kbd> their idea · <kbd>P</kbd> pass · <kbd>Esc</kbd> clear markers<br>
-        <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers</p>
+        <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers<br><kbd>Tab</kbd> to the board, then <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move · <kbd>Enter</kbd> play · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> step · <kbd>S</kbd> speech · <kbd>R</kbd> repeat</p>
       </details>
     </section>
   </aside>
