@@ -89,8 +89,28 @@ test('describe: attacks on dead stones are not praised', () => {
   assert.match(lines.join(' '), /already dead/);
   // A good move next to dead stones is neither praised nor scolded for it.
   assert.deepEqual(describe(f, ctx('improving')), []);
-  const taken = describe([{ type: 'capture', stones: [P('D6')], ko: false }, { type: 'deadTarget', stones: [P('D6')] }], ctx('improving'));
-  assert.deepEqual(taken, ['Captures 1 stone that was already dead.']);
+  const taken = [{ type: 'capture', stones: [P('D6')], ko: false }, { type: 'deadTarget', stones: [P('D6')] }];
+  assert.deepEqual(describe(taken, ctx('improving', { shown: { key: 'mistake', flagged: true } })), ['Captures 1 stone that was already dead.']);
+  assert.deepEqual(describe(taken, ctx('improving')), ['Captures 1 stone.']);
+});
+
+test('describe: shape lines give way to a tactical point', () => {
+  const flagged = ctx('strong', { shown: { key: 'inaccuracy', flagged: true } });
+  const f = [{ type: 'atari', double: false, stones: [P('A8'), P('A7')], trapped: null }, { type: 'alreadyConnected', via: 'diagonal' }, { type: 'emptyTriangle' }];
+  assert.deepEqual(describe(f, flagged), ['Atari: threatens to capture 2 stones next move.']);
+  assert.deepEqual(describe(f, ctx('strong')), ['Atari: threatens to capture 2 stones next move.']);
+});
+
+test('describe: lost stones are a sacrifice when the move was good', () => {
+  const f = [{ type: 'losesStones', stones: [P('C3'), P('C4')] }];
+  assert.deepEqual(describe(f, ctx('improving')), ['Gives up your 2 stones at C3 as a sacrifice.']);
+  assert.deepEqual(describe(f, ctx('improving', { shown: { key: 'mistake', flagged: true } })), ['Leaves your 2 stones at C3 to be captured.']);
+  assert.deepEqual(describe([{ type: 'hopelessRescue', stones: [P('B4')] }, { type: 'rescue', stones: [P('B4')], libs: 3 }], ctx('improving')), []);
+});
+
+test('describe: "Their idea" gives no careful-advice about the opponent\'s own stones', () => {
+  const f = [{ type: 'selfAtari', stones: 1 }, { type: 'fewLibs', stones: 3 }, { type: 'ownEye' }];
+  assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK, intent: true }), []);
 });
 
 test('describe: empty triangles and first-line moves are only criticised when the grade agrees', () => {

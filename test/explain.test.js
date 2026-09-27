@@ -76,6 +76,21 @@ test('boardFacts: a stone between two enemy groups is only a cut candidate', () 
   assert.deepEqual(facts.find(f => f.type === 'separates').at.map(ptName).sort(), ['D5', 'F5']);
 });
 
+test('boardFacts: pushing into the opponent\'s diagonal or bamboo link is no cut candidate', () => {
+  // White D5 and E6 touch diagonally; Black E5 pushes in, and White connects at D6.
+  const diag = Board.fromRows(['.........', '.........', '.........', '....O....', '...O.....', '.........', '.........', '.........', '.........'], BLACK);
+  assert.ok(!types(boardFacts(diag, played(diag, 'E5'), P('E5'))).includes('separates'));
+  const joint = Board.fromRows(['.........', '.........', '.........', '...O.O...', '...O.O...', '.........', '.........', '.........', '.........'], BLACK);
+  assert.ok(!types(boardFacts(joint, played(joint, 'E5'), P('E5'))).includes('separates'));
+});
+
+test('boardFacts: a capture that clears the fourth point is no empty triangle', () => {
+  // Black E5 captures White F5 next to Black E6 and F6.
+  const b = Board.fromRows(['.........', '.........', '.........', '....XX...', '.....OX..', '.....X...', '.........', '.........', '.........'], BLACK);
+  const t = types(boardFacts(b, played(b, 'E5'), P('E5')));
+  assert.ok(t.includes('capture') && !t.includes('emptyTriangle'), t.join());
+});
+
 test('boardFacts: self-atari, own eye, opening shape and passes', () => {
   const empty = new Board();
   assert.deepEqual(boardFacts(empty, played(empty, 'E5'), P('E5')), [{ type: 'shape', shape: 'opening' }]);
@@ -113,6 +128,15 @@ test('a stone between two groups that lives and keeps them apart is a cut', () =
   assert.ok(!types(facts).includes('stoneLost'));
 });
 
+test('no cut when the chains can still join in one move', () => {
+  // Black E5 splits White's two walls, but they share E3 below Black E4.
+  const walls = Board.fromRows(['.........', '.........', '.........', '.........', '...O.O...', '...OXO...', '...O.O...', '.........', '.........'], BLACK);
+  const reads = { after: read(WHITE, { own: { E5: 0.8 }, moves: [['J1', 0, ['J9']]] }) };
+  const facts = moveFacts({ before: walls, after: played(walls, 'E5'), move: P('E5'), reads });
+  assert.ok(types(boardFacts(walls, played(walls, 'E5'), P('E5'))).includes('separates'));
+  assert.ok(!types(facts).includes('cut'));
+});
+
 test('no cut is claimed before the position after the move has been read', () => {
   const before = Board.fromRows(SPLIT, BLACK);
   assert.ok(!types(moveFacts({ before, after: played(before, 'E5'), move: P('E5') })).includes('cut'));
@@ -122,18 +146,26 @@ const WALL = ['.........', '.........', '..XXXX...', '..XOOX...', '..X..X...', '
 
 test('an atari on stones that were already dead is a dead target', () => {
   const before = Board.fromRows(WALL, BLACK), after = played(before, 'D5');
-  const reads = { before: read(BLACK, { own: { D6: 0.8, E6: 0.8 } }), after: read(WHITE, { own: { D6: 0.9, E6: 0.9, D5: 0.9 } }) };
+  const dead = { D6: 0.8, E6: 0.8 };
+  const reads = { before: read(BLACK, { own: dead }), baseline: read(WHITE, { own: dead }), after: read(WHITE, { own: { D6: 0.9, E6: 0.9, D5: 0.9 } }) };
   const facts = moveFacts({ before, after, move: P('D5'), reads });
   assert.ok(types(facts).includes('atari'));
   assert.deepEqual(facts.find(f => f.type === 'deadTarget').stones.map(ptName).sort(), ['D6', 'E6']);
+  // Dead only because Black is to move (they live if Black passes): not a dead target.
+  const race = { ...reads, baseline: read(WHITE, { own: { D6: -0.4, E6: -0.4 } }) };
+  assert.ok(!types(moveFacts({ before, after, move: P('D5'), reads: race })).includes('deadTarget'));
+  // Nor before the baseline read is in.
+  assert.ok(!types(moveFacts({ before, after, move: P('D5'), reads: { ...reads, baseline: undefined } })).includes('deadTarget'));
 });
 
 test('the coach reads stones inside a wall as dead (real search)', () => {
   seed(1);
   const before = Board.fromRows(WALL, BLACK);
-  const s = new Search(before, { komi: 7 });
-  s.run(6000);
-  const facts = moveFacts({ before, after: played(before, 'D5'), move: P('D5'), reads: { before: s.results(10) } });
+  const run = b => { const s = new Search(b, { komi: 7 }); s.run(6000); return s.results(10); };
+  const base = before.clone();
+  base.play(PASS);
+  base.passes = 0;
+  const facts = moveFacts({ before, after: played(before, 'D5'), move: P('D5'), reads: { before: run(before), baseline: run(base) } });
   assert.ok(types(facts).includes('deadTarget'));
 });
 
@@ -165,7 +197,7 @@ const g3Reads = (threatMoves = [['C7', 3, [], 800], ['G5', 4, [], 500]]) => ({
 
 test('threatFacts: the best local follow-up that captures, and sente when they answer', () => {
   const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
-  const facts = threatFacts(after, P('G3'), BLACK, g3Reads());
+  const facts = threatFacts(before, after, P('G3'), BLACK, g3Reads());
   const threat = facts.find(f => f.type === 'threat');
   assert.equal(ptName(threat.move), 'G5');
   assert.equal(threat.what.type, 'capture');
@@ -175,8 +207,8 @@ test('threatFacts: the best local follow-up that captures, and sente when they a
 
 test('threatFacts: no threat from a quiet or distant follow-up', () => {
   const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
-  assert.deepEqual(threatFacts(after, P('G3'), BLACK, g3Reads([['G2', 4, [], 500]])), []);
-  assert.deepEqual(threatFacts(after, P('G3'), BLACK, g3Reads([['C7', 3, [], 800]])), []);
+  assert.deepEqual(threatFacts(before, after, P('G3'), BLACK, g3Reads([['G2', 4, [], 500]])), []);
+  assert.deepEqual(threatFacts(before, after, P('G3'), BLACK, g3Reads([['C7', 3, [], 800]])), []);
 });
 
 test('purposeFacts: which regions the move gains, and what the opponent would otherwise play', () => {
@@ -226,10 +258,25 @@ test('a move next to dead stones that does not attack them is not a dead target'
   assert.ok(!types(moveFacts({ before, after: played(before, 'D5'), move: P('D5'), reads })).includes('deadTarget'));
 });
 
-test('no sente when the answer is where the opponent wanted to play anyway', () => {
+test('no sente or gote when the answer is where the opponent wanted to play anyway', () => {
   const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
   const reads = { ...g3Reads(), baseline: read(WHITE, { score: -10, moves: [['G5']] }) };
-  assert.equal(threatFacts(after, P('G3'), BLACK, reads).find(f => f.type === 'initiative').sente, false);
+  const facts = threatFacts(before, after, P('G3'), BLACK, reads);
+  assert.ok(facts.some(f => f.type === 'threat'));
+  assert.ok(!facts.some(f => f.type === 'initiative'));
+});
+
+test('gote when the expected reply leaves the threat in place', () => {
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  const reads = { ...g3Reads(), after: read(WHITE, { score: -2, own: ownAll(LOWER, 0.8), moves: [['C7', -2]] }) };
+  assert.deepEqual(threatFacts(before, after, P('G3'), BLACK, reads).find(f => f.type === 'initiative'), { type: 'initiative', sente: false, reply: P('C7') });
+});
+
+test('a threat that was already there before the move is not credited to it', () => {
+  // G4 already had one liberty-short neighbour: Black could atari at G5 before G2 too.
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G2');
+  const reads = { ...g3Reads([['G5', 4, [], 500]]), after: read(WHITE, { moves: [['G5']] }) };
+  assert.deepEqual(threatFacts(before, after, P('G2'), BLACK, reads), []);
 });
 
 test('cachedFacts recomputes when any read is replaced, even by one of the same kind', () => {

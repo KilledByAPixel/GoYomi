@@ -13,6 +13,21 @@ export const dist = (a, b) => Math.abs(ptX(a) - ptX(b)) + Math.abs(ptY(a) - ptY(
 // The board in nine 3×3 regions, row by row from the top left (4 is the centre).
 export const regionOf = p => ((ptY(p) / 3) | 0) * 3 + ((ptX(p) / 3) | 0);
 
+// How two chains of colour c that both touch the empty point p were already
+// linked around it, so whichever gap the opponent takes the other connects:
+// 'diagonal' (the chains touch diagonally, the other point between them
+// empty), 'bamboo' (two parallel pairs with two gaps, p one of them) or null.
+export function linkThrough(board, p, c) {
+  for (const d of D4) for (const e of D4) {
+    if (e === d || e === -d) continue;
+    const a = p + d, b = p + e;
+    if (board.color[a] === c && board.color[b] === c && board.head[a] !== board.head[b] && board.color[p + d + e] === EMPTY) return 'diagonal';
+    const pairs = [p - d, p + d, p - d + e, p + d + e];
+    if (pairs.every(q => board.color[q] === c) && board.color[b] === EMPTY && board.head[p - d] !== board.head[p + d]) return 'bamboo';
+  }
+  return null;
+}
+
 // Facts readable from the stones alone.
 export function boardFacts(before, after, move) {
   if (move === PASS) return [{ type: 'pass' }];
@@ -56,32 +71,26 @@ export function boardFacts(before, after, move) {
     if (before.color[q] === c) friends.add(before.head[q]);
     if (before.color[q] === o && !enemies.has(before.head[q])) enemies.set(before.head[q], q);
   }
-  // Pairs of orthogonal neighbours at right angles: q1 and q2 are diagonal to
-  // each other, and far is the fourth corner of their 2×2 square with the move.
-  const corners = [];
-  for (const d1 of D4) for (const d2 of D4) if (d1 < d2 && d1 !== -d2) corners.push([move + d1, move + d2, move + d1 + d2]);
-  // Two groups touching diagonally with the other point between them empty were
-  // connected already: whichever side the opponent pushes in, the other connects.
-  const diagonalLink = friends.size === 2 && corners.some(([q1, q2, far]) =>
-    before.color[q1] === c && before.color[q2] === c && before.head[q1] !== before.head[q2] && before.color[far] === EMPTY);
-  // Bamboo joint: two parallel pairs with two gaps between them, the move filling one.
-  const bambooLink = friends.size === 2 && D4.some(d => D4.some(e => e !== d && e !== -d &&
-    [move - d, move + d, move - d + e, move + d + e].every(q => before.color[q] === c) &&
-    before.color[move + e] === EMPTY && before.head[move - d] !== before.head[move + d]));
-  const via = diagonalLink ? 'diagonal' : bambooLink ? 'bamboo' : null;
+  const via = friends.size === 2 ? linkThrough(before, move, c) : null;
   if (via) out.push({ type: 'alreadyConnected', via });
   else if (friends.size >= 2) out.push({ type: 'connect', groups: friends.size });
   // Only a candidate: whether it really cuts depends on how play goes on (lookAheadFacts).
-  if (enemies.size >= 2 && !captured.length && libs >= 2) out.push({ type: 'separates', at: [...enemies.values()] });
+  // Pushing into the opponent's own link is no cut: they connect at the other gap.
+  if (enemies.size >= 2 && !captured.length && libs >= 2 && !(enemies.size === 2 && linkThrough(before, move, o))) {
+    out.push({ type: 'separates', at: [...enemies.values()] });
+  }
 
   if (libs === 1 && !captured.length) out.push({ type: 'selfAtari', stones: size });
   else if (libs === 2 && size >= 3 && !rescued.size) out.push({ type: 'fewLibs', stones: size });
   if (before.isEyeish(move, c)) out.push({ type: 'ownEye' });
-  // Empty triangle: three stones in an L with the fourth point of their square empty.
-  const triangle = corners.some(qs => {
-    const s = qs.map(q => after.color[q]);
-    return s.filter(v => v === c).length === 2 && s.includes(EMPTY);
-  });
+  // Empty triangle: three stones in an L with the fourth point of their square
+  // empty (and empty before the move: a capture that clears it doesn't count).
+  const triangle = D4.some(d1 => D4.some(d2 => {
+    if (d1 >= d2 || d1 === -d2) return false;
+    const s = [move + d1, move + d2, move + d1 + d2];
+    const gap = s.filter(q => after.color[q] !== c);
+    return gap.length === 1 && after.color[gap[0]] === EMPTY && before.color[gap[0]] === EMPTY;
+  }));
   if (triangle) out.push({ type: 'emptyTriangle' });
 
   if (!out.some(f => f.type !== 'separates' && f.type !== 'emptyTriangle')) {
@@ -116,11 +125,23 @@ function playOut(board, line, max = 8) {
 
 const avg = xs => xs.reduce((s, v) => s + v, 0) / xs.length;
 
+// Whether any two of the chains at points ps share a liberty (one move joins them).
+function shareLiberty(b, ps) {
+  const seen = new Set();
+  for (const p of ps) {
+    const libs = b.chainLibs(p);
+    if (libs.some(q => seen.has(q))) return true;
+    for (const q of libs) seen.add(q);
+  }
+  return false;
+}
+
 // Facts that depend on how play is expected to go on. reads.after confirms or
-// rejects cuts and spots stones that will die; reads.before spots attacks on
-// stones that were already dead, and (with reads.after) stones the move loses.
+// rejects cuts and spots stones that will die; reads.before and reads.baseline
+// spot attacks on stones that were already dead, and reads.before (with
+// reads.after) stones the move loses.
 export function lookAheadFacts(before, after, move, facts, reads) {
-  const out = [], an = reads.after, pre = reads.before;
+  const out = [], an = reads.after, pre = reads.before, base = reads.baseline;
   if (move === PASS) return out;
   const c = before.toPlay, o = 3 - c;
   if (an) {
@@ -128,14 +149,18 @@ export function lookAheadFacts(before, after, move, facts, reads) {
     const sep = facts.find(f => f.type === 'separates');
     if (sep && alive > 0.3) {
       const b = playOut(after, expectedLine(an));
-      const apart = sep.at.every(p => b.color[p] === o) && new Set(sep.at.map(p => b.head[p])).size === sep.at.length;
+      const apart = sep.at.every(p => b.color[p] === o) && new Set(sep.at.map(p => b.head[p])).size === sep.at.length &&
+        !shareLiberty(b, sep.at);
       if (apart) out.push({ type: 'cut', groups: sep.at.length });
     }
     if (alive < -0.5) out.push({ type: 'stoneLost', stones: after.size[after.head[move]] });
     const res = facts.find(f => f.type === 'rescue');
     if (res && avg(res.stones.map(p => ownOf(an, p, c))) < -0.5) out.push({ type: 'hopelessRescue', stones: res.stones });
   }
-  if (pre) {
+  // Dead with either side to move: in the read before the move (the mover to
+  // play) stones can look dead only because it's the mover's turn, like a
+  // chain in atari or a capturing race the mover wins by moving first.
+  if (pre && base) {
     const targets = [], seen = new Set();
     for (const d of D4) {
       const q = move + d;
@@ -143,7 +168,7 @@ export function lookAheadFacts(before, after, move, facts, reads) {
       seen.add(before.head[q]);
       const stones = before.chainStones(q);
       const attacked = after.color[q] !== o || after.libCount(q) <= 2;
-      if (attacked && avg(stones.map(p => ownOf(pre, p, c))) > 0.6) targets.push(...stones);
+      if (attacked && avg(stones.map(p => Math.min(ownOf(pre, p, c), ownOf(base, p, c)))) > 0.6) targets.push(...stones);
     }
     if (targets.length) out.push({ type: 'deadTarget', stones: targets });
   }
@@ -158,24 +183,40 @@ export function lookAheadFacts(before, after, move, facts, reads) {
 // ataris or cuts, if the opponent ignored the move (reads.threat), and
 // whether the opponent is expected to answer it (sente). No point value: on
 // an open board any second move is worth ~10 points, so a number misleads.
-export function threatFacts(after, move, mover, reads) {
+export function threatFacts(before, after, move, mover, reads) {
   const an = reads.after, th = reads.threat;
   if (!an || !th || move === PASS) return [];
   const list = th.allMoves || th.moves || [];
   const top = list.length ? list[0].visits : 0;
   const tb = after.clone();
   tb.play(PASS);
+  // What a move at p does on board b, with the mover to play: a capture, an atari, a cut candidate or nothing.
+  const does = (b, p) => {
+    if (!b.isLegal(p)) return null;
+    const b2 = b.clone();
+    b2.play(p);
+    return boardFacts(b, b2, p).find(f => f.type === 'capture' || f.type === 'atari' || f.type === 'separates') || null;
+  };
+  const same = (a, b) => !!a && !!b && a.type === b.type && (a.stones || a.at).some(p => (b.stones || b.at).includes(p));
   for (const m of list) {
-    if (m.move === PASS || dist(m.move, move) > 3 || m.visits < top * 0.05 || !tb.isLegal(m.move)) continue;
-    const t2 = tb.clone();
-    t2.play(m.move);
-    const what = boardFacts(tb, t2, m.move).find(f => f.type === 'capture' || f.type === 'atari' || f.type === 'separates');
-    if (!what) continue;
-    const reply = an.moves && an.moves[0];
+    if (m.move === PASS || dist(m.move, move) > 3 || m.visits < top * 0.05) continue;
+    const what = does(tb, m.move);
+    // Not a threat the move made if the mover could already do the same before it.
+    if (!what || same(what, does(before, m.move))) continue;
+    const reply = an.moves && an.moves[0] ? an.moves[0].move : PASS;
+    // Sente when the expected reply takes the threat away.
+    let answered = false;
+    if (reply !== PASS && after.isLegal(reply)) {
+      const rb = after.clone();
+      rb.play(reply);
+      answered = !same(what, does(rb, m.move));
+    }
+    // An answer where the opponent wanted to play anyway says nothing about sente or gote.
     const wanted = reads.baseline && reads.baseline.moves && reads.baseline.moves.find(x => x.move !== PASS);
-    const anyway = !!wanted && wanted.move !== move && reply && reply.move !== PASS && dist(reply.move, wanted.move) <= 1;
-    const sente = !!reply && reply.move !== PASS && !anyway && (dist(reply.move, move) <= 2 || dist(reply.move, m.move) <= 1);
-    return [{ type: 'threat', move: m.move, what }, { type: 'initiative', sente, reply: reply ? reply.move : PASS }];
+    const anyway = answered && !!wanted && wanted.move !== move && dist(reply, wanted.move) <= 1;
+    const out = [{ type: 'threat', move: m.move, what }];
+    if (!anyway) out.push({ type: 'initiative', sente: answered, reply });
+    return out;
   }
   return [];
 }
@@ -213,7 +254,7 @@ export function moveFacts({ before, after, move, reads = {} }) {
   const all = [
     ...facts.filter(f => f.type !== 'separates'),
     ...lookAheadFacts(before, after, move, facts, reads),
-    ...threatFacts(after, move, mover, reads),
+    ...threatFacts(before, after, move, mover, reads),
     ...purposeFacts(move, mover, reads),
   ];
   // Stones the opponent is expected to rescue weren't dead after all: the

@@ -110,12 +110,16 @@ export function describe(facts, ctx) {
   const threat = find('threat'), init = find('initiative'), purpose = find('purpose');
   const dead = find('deadTarget'), capture = find('capture'), atari = find('atari');
   const sente = !!(init && init.sente);
+  // Lines that criticise the move wait for a grade that agrees (ctx.shown).
+  const flagged = !!(ctx.shown && ctx.shown.flagged);
+  // A move with a tactical point isn't described by its shape.
+  const tactical = !!(capture || atari || threat || find('rescue'));
   const out = [];
   for (const f of facts) {
     switch (f.type) {
       case 'pass': out.push('Passes.'); break;
       case 'capture': {
-        const already = overlaps(f.stones, dead && dead.stones) ? ` that ${f.stones.length === 1 ? 'was' : 'were'} already dead` : '';
+        const already = flagged && overlaps(f.stones, dead && dead.stones) ? ` that ${f.stones.length === 1 ? 'was' : 'were'} already dead` : '';
         out.push(f.ko ? 'Takes the ko.' : `Captures ${count(f.stones.length)}${already}.`);
         break;
       }
@@ -128,7 +132,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'hopelessRescue':
-        out.push(`Tries to save ${count(f.stones.length)}, but the coach expects ${f.stones.length === 1 ? 'it' : 'them'} to be captured anyway.`);
+        if (flagged) out.push(`Tries to save ${count(f.stones.length)}, but the coach expects ${f.stones.length === 1 ? 'it' : 'them'} to be captured anyway.`);
         break;
       case 'atari': {
         if (overlaps(f.stones, dead && dead.stones)) break; // the deadTarget line says it
@@ -150,7 +154,7 @@ export function describe(facts, ctx) {
       }
       case 'connect': out.push(`Connects ${f.groups} groups into one.`); break;
       case 'alreadyConnected': {
-        if (!ctx.shown) break; // a needless connection or a solid one depends on the grade
+        if (!ctx.shown || tactical) break; // a needless connection or a solid one depends on the grade
         const bamboo = f.via === 'bamboo';
         if (!ctx.shown.flagged) out.push(bamboo ? 'Makes the bamboo joint solid.' : 'Makes the diagonal connection solid.');
         else if (B) {
@@ -160,7 +164,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'emptyTriangle':
-        if (!ctx.shown || !ctx.shown.flagged || find('alreadyConnected')) break;
+        if (!flagged || tactical || find('alreadyConnected')) break;
         out.push(B ? 'Makes an empty triangle: three stones bunched in an L. It\'s a slow shape with few liberties.'
           : 'Makes an empty triangle, an inefficient shape.');
         break;
@@ -173,23 +177,26 @@ export function describe(facts, ctx) {
         break;
       }
       case 'losesStones':
-        out.push(B ? `${cap(w.subj(opp))} can now capture ${w.stones(mover, f.stones)}.` : `Leaves ${w.stones(mover, f.stones)} to be captured.`);
+        if (!ctx.shown) break; // sacrifice or loss depends on the grade
+        if (!flagged) out.push(`Gives up ${w.stones(mover, f.stones)}${B ? ', but it gains more elsewhere' : ' as a sacrifice'}.`);
+        else out.push(B ? `${cap(w.subj(opp))} can now capture ${w.stones(mover, f.stones)}.` : `Leaves ${w.stones(mover, f.stones)} to be captured.`);
         break;
       case 'selfAtari': {
+        if (ctx.intent) break; // "careful" is advice for the mover, not about the opponent's idea
         const it = f.stones > 1 ? 'group' : 'stone';
         out.push(B ? `Careful: this ${it} now has only 1 liberty, so it can be captured.` : `Careful: this ${it} is now in atari — it can be captured.`);
         break;
       }
-      case 'fewLibs': out.push(B ? `${cap(w.poss(mover))} group now has 2 liberties. Careful.` : 'The group has only 2 liberties — watch out for atari.'); break;
-      case 'ownEye': out.push(B ? 'Fills its own eye. A group needs two eyes to live, so this can kill it.'
+      case 'fewLibs': if (!ctx.intent) out.push(B ? `${cap(w.poss(mover))} group now has 2 liberties. Careful.` : 'The group has only 2 liberties — watch out for atari.'); break;
+      case 'ownEye': if (!ctx.intent) out.push(B ? 'Fills its own eye. A group needs two eyes to live, so this can kill it.'
         : `Fills its own eye — usually a waste, and can kill ${mover === ctx.you ? 'your' : 'its'} own group.`); break;
       case 'separates': if (ctx.intent) out.push(`Aims to cut ${w.poss(opp)} stones apart.`); break;
       case 'shape': {
-        const badShape = find('emptyTriangle') && ctx.shown && ctx.shown.flagged; // don't call it solid as well
+        const badShape = find('emptyTriangle') && flagged; // don't call it solid as well
         if (!threat && !purpose && !find('cut') && !(ctx.intent && find('separates')) && !badShape) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]);
         break;
       }
-      case 'firstLine': if (ctx.shown && ctx.shown.flagged) out.push('First-line moves are usually small this early in the game.'); break;
+      case 'firstLine': if (flagged) out.push('First-line moves are usually small this early in the game.'); break;
       case 'threat': {
         const t = f.what;
         const what = t.type === 'capture' ? `capture ${w.stones(opp, t.stones)}`
