@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Board, BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, pt, ptName, parsePt, SIZE } from '../src/board.js';
+import { Board, BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, pt, ptName, parsePt, SIZE, boardSymmetries } from '../src/board.js';
 
 // Naive reference implementation: flood fill everything.
 function groupAndLibs(color, p) {
@@ -176,4 +176,24 @@ test('coordinates round-trip', () => {
   assert.equal(ptName(pt(0, 8)), 'A1');
   assert.equal(ptName(pt(8, 0)), 'J9');
   assert.equal(parsePt('pass'), PASS);
+});
+
+test('boardSymmetries finds the transforms that leave the position unchanged', () => {
+  const empty = new Board();
+  assert.equal(boardSymmetries(empty).length, 7);
+  const at = (...names) => {
+    const b = new Board();
+    for (const n of names) { b.play(parsePt(n)); b.play(PASS); }
+    b.passes = 0;
+    return b;
+  };
+  assert.equal(boardSymmetries(at('E5')).length, 7);
+  // C3 sits on the anti-diagonal: only that reflection keeps it in place.
+  const one = boardSymmetries(at('C3'));
+  assert.equal(one.length, 1);
+  assert.equal(ptName(one[0][parsePt('G7')]), 'G7');
+  assert.equal(ptName(one[0][parsePt('C7')]), 'G3');
+  // Two black stones mirrored through the centre: half-turn and both diagonals.
+  assert.equal(boardSymmetries(at('C3', 'G7')).length, 3);
+  assert.equal(boardSymmetries(at('C3', 'D3')).length, 0);
 });

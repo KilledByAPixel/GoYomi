@@ -390,3 +390,32 @@ export class Board {
     return b;
   }
 }
+
+// The 8 symmetries of the square board as point maps (index 0 is the identity).
+export const SYMMETRIES = [];
+for (let k = 0; k < 8; k++) {
+  const map = new Int16Array(SIZE);
+  for (let p = 0; p < SIZE; p++) map[p] = p;
+  for (const p of POINTS) {
+    let x = ptX(p), y = ptY(p);
+    if (k & 1) x = N - 1 - x;
+    if (k & 2) y = N - 1 - y;
+    if (k & 4) [x, y] = [y, x];
+    map[p] = pt(x, y);
+  }
+  SYMMETRIES.push(map);
+}
+
+// Symmetries (other than the identity) that leave the position unchanged,
+// so moves they map onto each other are equally good.
+export function boardSymmetries(b) {
+  const out = [], color = b.color;
+  for (let k = 1; k < 8; k++) {
+    const m = SYMMETRIES[k];
+    if (b.ko && m[b.ko] !== b.ko) continue;
+    let same = true;
+    for (const p of POINTS) if (color[m[p]] !== color[p]) { same = false; break; }
+    if (same) out.push(m);
+  }
+  return out;
+}

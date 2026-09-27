@@ -62,7 +62,7 @@ export function mergeResults(list) {
   for (const r of list) {
     for (const m of r.allMoves || r.moves) {
       let e = byMove.get(m.move);
-      if (!e) byMove.set(m.move, e = { move: m.move, visits: 0, wsum: 0, ssum: 0, prior: m.prior, pv: m.pv, pvVisits: -1 });
+      if (!e) byMove.set(m.move, e = { move: m.move, visits: 0, wsum: 0, ssum: 0, prior: m.prior, pv: m.pv, pvVisits: -1, twins: m.twins });
       e.visits += m.visits;
       e.wsum += m.winrate * m.visits;
       e.ssum += m.score * m.visits;
@@ -70,7 +70,7 @@ export function mergeResults(list) {
     }
   }
   const all = [...byMove.values()]
-    .map(e => ({ move: e.move, visits: e.visits, winrate: e.wsum / e.visits, score: e.ssum / e.visits, prior: e.prior, pv: e.pv }))
+    .map(e => ({ move: e.move, visits: e.visits, winrate: e.wsum / e.visits, score: e.ssum / e.visits, prior: e.prior, pv: e.pv, ...(e.twins && { twins: e.twins }) }))
     .sort((a, b) => b.visits - a.visits);
   const toPlay = list[0].toPlay;
   return {
@@ -81,6 +81,7 @@ export function mergeResults(list) {
 }
 
 // Several workers searching the same position; same interface as Engine.
+// The engines can also be given separate jobs directly (pool.engines[i]).
 export class EnginePool {
   constructor(name, size) {
     this.engines = Array.from({ length: size }, (_, i) => new Engine(`${name}${i}`));
@@ -112,12 +113,12 @@ export class EnginePool {
     });
   }
 
+  // Stops the pooled search and any separate jobs on the engines.
   cancel() {
-    if (!this.pending) return;
     const p = this.pending;
     this.pending = null;
     for (const e of this.engines) e.cancel();
-    p.resolve(null);
+    if (p) p.resolve(null);
   }
 
   get busy() { return !!this.pending; }

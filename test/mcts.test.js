@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Board, BLACK, WHITE, pt, ptName, POINTS, N, ptX, ptY } from '../src/board.js';
+import { Board, BLACK, WHITE, PASS, pt, ptName, POINTS, N, ptX, ptY } from '../src/board.js';
 import { Search, seed } from '../src/mcts.js';
 
 const best = (b, playouts, komi = 7) => {
@@ -64,4 +64,19 @@ test('ownership reflects a clearly won area', () => {
   assert.ok(r.ownership[POINTS.indexOf(pt(8, 8))] < -0.5, 'bottom-right owned by white');
   // Black has 45 points, white 36 + 7 komi = 43 → black should be winning.
   assert.ok(r.blackWinrate > 0.6, `black winrate ${r.blackWinrate}`);
+});
+
+test('symmetric root moves are searched once, with their twins listed', () => {
+  seed(3);
+  const s = new Search(new Board(), { komi: 7 });
+  // One representative per orbit: the 15 points of a 1/8 triangle of the 9x9 board (+ pass).
+  assert.equal(s.root.children.filter(ch => ch.move !== PASS).length, 15);
+  const all = new Set();
+  for (const ch of s.root.children) if (ch.move !== PASS) for (const p of [ch.move, ...(ch.twins || [])]) all.add(p);
+  assert.equal(all.size, 81, 'every point is some move or its twin');
+  const c3 = s.root.children.find(ch => [ch.move, ...(ch.twins || [])].includes(pt(2, 6)));
+  assert.equal(c3.twins.length, 3, 'a 3-3 point has 4 images');
+  s.run(2000);
+  const r = s.results(40);
+  assert.ok(r.allMoves.some(m => m.twins && m.twins.length === 7), 'results list the twins');
 });

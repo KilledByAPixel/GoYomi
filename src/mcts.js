@@ -1,7 +1,7 @@
 // Monte-Carlo tree search with RAVE, closely following the design of
 // Petr Baudis' "michi": heuristic priors instead of an exploration term,
 // playouts guided by capture/atari and 3x3 pattern heuristics.
-import { Board, BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, DIAG, W, SIZE, N, ptX, ptY } from './board.js';
+import { Board, BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, DIAG, W, SIZE, N, ptX, ptY, boardSymmetries } from './board.js';
 import { matchesPat3 } from './patterns.js';
 
 export const PARAMS = {
@@ -294,6 +294,26 @@ function terminalScore(b, owner) {
   return a.black - a.white;
 }
 
+// Moves that a symmetry of the position maps onto each other are the same
+// move: search one of each (the one the priors like best) and list the rest as
+// its twins, so mirror images never get different verdicts.
+function foldSymmetricMoves(root, b) {
+  const syms = boardSymmetries(b);
+  if (!syms.length) return;
+  const legal = new Set(root.children.map(ch => ch.move));
+  const byPrior = [...root.children].sort((x, y) => y.pw / y.pn - x.pw / x.pn || y.pn - x.pn);
+  const taken = new Set(), keep = new Set();
+  for (const ch of byPrior) {
+    if (taken.has(ch.move)) continue;
+    keep.add(ch);
+    const twins = new Set();
+    for (const m of syms) if (m[ch.move] !== ch.move && legal.has(m[ch.move])) twins.add(m[ch.move]);
+    for (const t of twins) taken.add(t);
+    if (twins.size) ch.twins = [...twins];
+  }
+  root.children = root.children.filter(ch => keep.has(ch));
+}
+
 export class Search {
   // opts: { komi, forbidden(p) => bool for root superko, seed }
   constructor(board, opts = {}) {
@@ -310,6 +330,7 @@ export class Search {
     this.playouts = 0;
     this.path = [];
     expand(this.root, this.board, this.forbidden);
+    foldSymmetricMoves(this.root, this.board);
     // Passing is always an option at the root; its value is learned like any move.
     if (!this.root.children.some(ch => ch.move === PASS)) {
       const pass = new Node(PASS, board.toPlay);
@@ -386,6 +407,7 @@ export class Search {
         score: ch.scoreSum / ch.n,  // black perspective
         prior: (ch.pw / ch.pn),
         pv: principalVariation(ch),  // expected continuation after this move
+        ...(ch.twins && { twins: ch.twins }),  // moves a symmetry of the board makes identical
       }))
       .sort((a, b) => b.visits - a.visits);
     return {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -73,6 +73,61 @@ test('gradeMove is lenient on points when the game is already decided', () => {
   const before = analysis(WHITE, 0.99, -30, [{ move: P('E5'), visits: 900, winrate: 0.99, score: -30 }]);
   const g = gradeMove(before, analysis(BLACK, 0.02, -29, []), P('C3'));
   assert.equal(g.grade, 'good');
+});
+
+test('gradeMove: a mirror image of the best move is the best move', () => {
+  const before = analysis(BLACK, 0.5, 0, [
+    { move: P('C3'), visits: 500, winrate: 0.5, score: 0, twins: [P('G3'), P('C7'), P('G7')] },
+    { move: P('E5'), visits: 400, winrate: 0.49, score: -0.5 },
+  ]);
+  // The read after G7 happens to come out a little lower than C3's; still the same move.
+  const g = gradeMove(before, analysis(WHITE, 0.53, -1, []), P('G7'));
+  assert.equal(g.grade, 'best');
+  assert.equal(reviewNeeded(g, before), null);
+});
+
+test('gradeMove: the side-by-side check tempers or confirms a loss', () => {
+  const A = P('E5'), B = P('D4');
+  const before = analysis(BLACK, 0.6, 3, [
+    { move: A, visits: 800, winrate: 0.6, score: 3 },
+    { move: B, visits: 10, winrate: 0.4, score: -3 },
+  ]);
+  const after = analysis(WHITE, 0.55, -1, []); // black: winrate 0.45, score -1 → looks 4 points worse
+  const g = gradeMove(before, after, B);
+  assert.equal(g.grade, 'mistake');
+  assert.equal(reviewNeeded(g, before), A, 'read after the best move before saying so');
+  // Read as deeply, the best move leads to the same result: not a mistake after all.
+  const same = gradeMove(before, after, B, { move: A, analysis: analysis(WHITE, 0.55, -1.2, []) });
+  assert.equal(same.grade, 'inaccuracy', 'averaged: 4 points and 0 → 2');
+  assert.equal(reviewNeeded(same, before), null);
+  GRADING.combine = 'min';
+  assert.equal(gradeMove(before, after, B, { move: A, analysis: analysis(WHITE, 0.55, -1.2, []) }).grade, 'good');
+  GRADING.combine = 'avg';
+  // Confirmed: the best move really is better.
+  const worse = gradeMove(before, after, B, { move: A, analysis: analysis(WHITE, 0.4, 3, []) });
+  assert.equal(worse.grade, 'mistake');
+});
+
+test('gradeMove: when the coach agreed with a move that then looks bad, the runner-up is checked', () => {
+  const A = P('F1'), B = P('E5');
+  const before = analysis(WHITE, 0.6, -3, [
+    { move: A, visits: 800, winrate: 0.6, score: -3 },
+    { move: B, visits: 300, winrate: 0.55, score: -2 },
+  ]);
+  // After F1 black is doing well: the first read missed something.
+  const after = analysis(BLACK, 0.7, 5, []);
+  const g = gradeMove(before, after, A);
+  assert.equal(g.grade, 'best');
+  assert.equal(reviewNeeded(g, before), B);
+  const checked = gradeMove(before, after, A, { move: B, analysis: analysis(BLACK, 0.35, -4, []) });
+  assert.equal(checked.grade, 'blunder');
+  assert.equal(checked.bestMove, B);
+  assert.ok(checked.ptLoss >= 8);
+  // The runner-up is no better: F1 stays the best move.
+  const fine = gradeMove(before, after, A, { move: B, analysis: analysis(BLACK, 0.72, 6, []) });
+  assert.equal(fine.grade, 'best');
+  // No surprise, no check.
+  assert.equal(reviewNeeded(gradeMove(before, analysis(BLACK, 0.41, -2.5, []), A), before), null);
 });
 
 test('explainMove describes captures, atari and self-atari', () => {

@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
-import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, GRADES, explainMove, threats, describeScore } from './coach.js';
+import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, GRADES, explainMove, threats, describeScore } from './coach.js';
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
@@ -30,7 +30,7 @@ const DEFAULTS = {
   komi: 7,
   handicap: 0,
   coach: true,
-  coachPlayouts: 24000,
+  coachPlayouts: 48000,
   sound: true,
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
@@ -46,11 +46,11 @@ let better = null;           // { node, move, pv } — coach move shown on node'
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
-let coachNode = null;
+let coachJobs = [];          // per coach engine: the work item it is reading (see coachQueue)
 let threat = null;           // { node, pending | none | move, pv, explain, cost } — opponent's idea
 
 const opponent = new Engine('opponent');
-// The coach searches the same position on several cores and merges the trees' root stats.
+// Coach engines, one position each; pooled (root stats merged) only for the quick dead-stone read.
 const coach = new EnginePool('coach', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2)));
 // Answers "what would the opponent play if I passed?"
 const scout = new Engine('scout');
@@ -247,47 +247,104 @@ async function aiMove(force = false, best = false) {
 
 // ------------------------------------------------------------------ coach
 
-function pickCoachTarget() {
-  const cur = game.current;
-  if (!cur.analysisDone) return cur;
-  if (cur.parent && !cur.parent.analysisDone) return cur.parent;
-  const line = game.line();
-  const idx = line.indexOf(cur);
-  for (let d = 1; d < line.length; d++) {
-    const a = line[idx - d], b = line[idx + d];
-    if (a && !a.analysisDone) return a;
-    if (b && !b.analysisDone) return b;
+// Coach work items: { node } reads node's position; { node, move } reads the
+// position after `move` from node's parent, to check node's grade against.
+const workKey = w => w.move == null ? `${w.node.id}` : `${w.node.id}:${w.move}`;
+const checkRead = (node, move) => node.checks && node.checks.get(move) ||
+  (node.parent.children.find(ch => ch.move === move && ch.analysisDone) || {}).analysis;
+
+// A node's outstanding coach work, most urgent first.
+function coachWork(node, out, ahead) {
+  if (!node) return;
+  if (!node.analysisDone) out.push({ node });
+  else if (node.checkMove != null) out.push({ node, move: node.checkMove });
+  // Moves other than the coach's choice often need the check read against it:
+  // start it early, on a spare engine, so the grade doesn't wait for two reads.
+  if (ahead && !node.grade && node.parent && node.parent.analysisDone && node.checkMove == null) {
+    const e = entryFor(node.parent.analysis, node.move), best = node.parent.analysis.moves[0];
+    if (best && best.move !== PASS && e !== best && !checkRead(node, best.move)) out.push({ node, move: best.move });
   }
-  return null;
 }
 
+// The coach's to-do list: the current position and the one before it (needed
+// to grade the latest move), then the rest of the game outwards from here.
+function coachQueue(max) {
+  const cur = game.current, out = [];
+  coachWork(cur, out, true);
+  coachWork(cur.parent, out, true);
+  const line = game.line(), idx = line.indexOf(cur);
+  for (let d = 1; d < line.length && out.length < max; d++) {
+    coachWork(line[idx - 1 - d], out);
+    coachWork(line[idx + d], out);
+  }
+  return out.slice(0, max);
+}
+
+// Each coach engine reads its own position in one deep search (deeper reads
+// grade better than several shallow ones merged). Keeps the engines on the
+// most urgent work, pre-empting background reads when something more urgent comes up.
 function scheduleCoach() {
   if (!settings.coach || (scoring && scoring.pending)) return;
-  const target = pickCoachTarget();
-  if (!target) return;
-  // Don't pre-empt background work, nor the read of the move just before the
-  // current one (it's needed to grade that move; a fast AI reply would otherwise
-  // restart it forever).
-  if (coachNode && (coachNode === target || target !== game.current || coachNode === game.current.parent)) return;
-  coachNode = target;
-  coach.search(game.recipe(target), {
+  const engines = coach.engines;
+  const want = coachQueue(engines.length);
+  const wanted = new Set(want.map(workKey));
+  const running = new Set(coachJobs.filter(Boolean).map(workKey));
+  for (const w of want) {
+    if (running.has(workKey(w))) continue;
+    let i = engines.findIndex((_, k) => !coachJobs[k]);
+    if (i < 0) i = coachJobs.findIndex(j => !wanted.has(workKey(j)));
+    if (i < 0) break;
+    startCoachJob(i, w);
+  }
+}
+
+function startCoachJob(i, w) {
+  const job = coachJobs[i] = w, node = w.node;
+  let recipe;
+  if (w.move != null) {
+    recipe = game.recipe(node.parent);
+    recipe.moves = [...recipe.moves, [w.move, node.color]];
+  } else recipe = game.recipe(node);
+  coach.engines[i].search(recipe, {
     playouts: settings.coachPlayouts,
-    maxTime: 120000,
+    // A slow device gets a shallower read rather than a long wait (desktops run ~7k playouts/s).
+    maxTime: settings.coachPlayouts / 2.5,
     onProgress: (res, done) => {
-      target.analysis = res;
-      if (done) target.analysisDone = true;
-      onAnalysis(target);
+      if (w.move != null) {
+        if (!done) return;
+        (node.checks = node.checks || new Map()).set(w.move, res);
+        if (node.checkMove === w.move) node.checkMove = null;
+      } else {
+        node.analysis = res;
+        if (done) node.analysisDone = true;
+      }
+      onAnalysis(node);
     },
   }).then(res => {
-    if (coachNode === target) coachNode = null;
+    if (coachJobs[i] === job) coachJobs[i] = null;
     if (res) scheduleCoach();
   });
 }
 
+function stopCoach() {
+  coach.cancel();
+  coachJobs = [];
+}
+
+// Grades node's move once both positions are read. A grade that needs a check
+// read first (reviewNeeded) waits for it; scheduleCoach picks that up.
 function tryGrade(node) {
   const parent = node.parent;
   if (!parent || node.grade || !parent.analysisDone || !node.analysisDone) return;
-  node.grade = gradeMove(parent.analysis, node.analysis, node.move);
+  let g = gradeMove(parent.analysis, node.analysis, node.move);
+  const other = reviewNeeded(g, parent.analysis);
+  if (other != null) {
+    const an = checkRead(node, other);
+    if (!an) { node.checkMove = other; return; }
+    g = gradeMove(parent.analysis, node.analysis, node.move, { move: other, analysis: an });
+  }
+  node.checkMove = null;
+  node.grade = g;
   node.explain = explainMove(parent.board, node.board, node.move, parent.analysis.ownership, node.analysis.ownership);
 }
 
@@ -317,8 +374,7 @@ async function enterScoring() {
   }
   let an = node.analysisDone ? node.analysis : null;
   if (!an) {
-    coach.cancel();
-    coachNode = null;
+    stopCoach();
     an = await coach.search(game.recipe(node), { playouts: 8000, reportMs: 0 });
     if (an) { node.analysis = an; node.analysisDone = true; tryGrade(node); }
   }
@@ -416,11 +472,13 @@ function hintList(an) {
   if (!ms.length) return [];
   const top = ms[0];
   const sgn = an.toPlay === BLACK ? 1 : -1;
-  return ms.filter(m => m.visits >= Math.max(8, top.visits * 0.06)).slice(0, 6).map((m, rank) => {
+  return ms.filter(m => m.visits >= Math.max(8, top.visits * 0.06)).slice(0, 6).flatMap((m, rank) => {
     const loss = top.winrate - m.winrate;
     const color = rank === 0 ? '#2f9e61' : loss < 0.04 ? '#3b82c4' : loss < 0.1 ? '#b8901c' : '#cf6a1d';
     const lead = m.score * sgn;
-    return { move: m.move, rank, color, label: `${Math.round(m.winrate * 100)}%`, sub: `${lead >= 0 ? '+' : ''}${lead.toFixed(1)}` };
+    const hint = { rank, color, label: `${Math.round(m.winrate * 100)}%`, sub: `${lead >= 0 ? '+' : ''}${lead.toFixed(1)}` };
+    // Mirror images on a symmetric board are the same move: mark them all.
+    return [m.move, ...(m.twins || [])].map(move => ({ ...hint, move }));
   });
 }
 
@@ -582,12 +640,14 @@ function moveEntry(node) {
   let html = '';
   const g = node.grade;
   if (node.move === PASS || !settings.show.feedback) html = head('');
-  else if (!g) html = head('<span class="pill pending">grading…</span>');
+  else if (!g) html = head(`<span class="pill pending">${node.checkMove != null ? 'double-checking…' : 'grading…'}</span>`);
   else {
     const G = GRADES[g.grade];
     html = head(`<span class="pill" style="--pill:${G.color}">${G.label}</span>`);
     if (g.grade === 'best') html += '<p>Exactly the coach\'s choice.</p>';
-    else if (g.grade === 'good') html += `<p>A fine move. The coach slightly preferred <b>${ptName(g.bestMove)}</b>.</p>`;
+    else if (g.grade === 'good') html += g.ptLoss < 0.5 && g.wrLoss < 0.02
+      ? `<p>About as good as the coach's choice, <b>${ptName(g.bestMove)}</b>.</p>`
+      : `<p>A fine move. The coach slightly preferred <b>${ptName(g.bestMove)}</b>.</p>`;
     else html += `<p>About <b>${g.ptLoss.toFixed(1)} points</b> worse than <b>${ptName(g.bestMove)}</b>${g.wrLoss >= 0.01 ? ` (win chance −${Math.round(g.wrLoss * 100)}%)` : ''}.</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
       html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}">Show ${ptName(g.bestMove)}</button>` +
@@ -713,7 +773,9 @@ function load() {
     if (!d) return false;
     settings = { ...structuredClone(DEFAULTS), ...d.settings, show: { ...DEFAULTS.show, ...(d.settings && d.settings.show) } };
     settings.level = Math.min(LEVELS.length - 1, Math.max(0, settings.level | 0));
-    if (![8000, 24000, 80000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
+    // Quick / Normal / Deep were 8k / 24k / 80k before the coach read each position in one tree.
+    settings.coachPlayouts = { 8000: 16000, 24000: 48000, 80000: 120000 }[settings.coachPlayouts] || settings.coachPlayouts;
+    if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
     if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
     if (!Number.isFinite(settings.komi)) settings.komi = DEFAULTS.komi;
@@ -809,7 +871,7 @@ function setupControls() {
     settings.coachPlayouts = +e.target.value;
     // Re-read positions at the new depth.
     for (const n of game.line()) n.analysisDone = false;
-    coach.cancel(); coachNode = null;
+    stopCoach();
     save(); scheduleCoach();
   };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };

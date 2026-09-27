@@ -23,19 +23,21 @@ const sign = c => c === BLACK ? 1 : -1;
 export function chooseMove(results, level, rand = Math.random) {
   const moves = (results.allMoves || results.moves).filter(m => m.move !== PASS);
   if (!moves.length) return PASS;
+  // Any mirror image of the chosen move will do; vary it so games don't repeat.
+  const pick = m => m.twins ? [m.move, ...m.twins][(rand() * (m.twins.length + 1)) | 0] : m.move;
   const top = moves[0];
   if (level.blunder && rand() < level.blunder && moves.length > 3) {
     // An honest beginner blunder: any move the search looked at a little.
     const pool = moves.filter(m => m.visits >= 2);
-    if (pool.length) return pool[(rand() * pool.length) | 0].move;
+    if (pool.length) return pick(pool[(rand() * pool.length) | 0]);
   }
-  if (!level.temp) return top.move;
+  if (!level.temp) return pick(top);
   // Sample proportional to visits^temp among reasonable candidates.
   const pool = moves.filter(m => m.visits >= top.visits * 0.05);
   const weights = pool.map(m => Math.pow(m.visits, level.temp));
   let r = rand() * weights.reduce((a, b) => a + b, 0);
-  for (let i = 0; i < pool.length; i++) if ((r -= weights[i]) <= 0) return pool[i].move;
-  return top.move;
+  for (let i = 0; i < pool.length; i++) if ((r -= weights[i]) <= 0) return pick(pool[i]);
+  return pick(top);
 }
 
 // Average ownership over each chain; chains owned by the other side are dead.
@@ -95,31 +97,85 @@ export const GRADES = {
   blunder: { label: 'Blunder', color: '#d2413a' },
 };
 
-// Grades the move from `before` (analysis of the parent, mover to play) to
-// `after` (analysis of the position after the move).
-export function gradeMove(before, after, move) {
-  if (!before || !after || !before.moves || !before.moves.length) return null;
-  const mover = before.toPlay;
-  const best = bestOf(before);
-  const wrAfter = 1 - after.winrate;
-  const scoreAfter = after.score * sign(mover);
-  // Take the better of "as seen from before" and "as seen from after" for the
-  // played move, so a move the first search barely looked at isn't unfairly judged.
-  const seen = before.moves.find(m => m.move === move && m.visits >= 30);
-  const wr = seen ? Math.max(wrAfter, Math.min(seen.winrate, wrAfter + 0.1)) : wrAfter;
-  const sc = seen ? Math.max(scoreAfter, Math.min(seen.score * sign(mover), scoreAfter + 3)) : scoreAfter;
-  const wrLoss = Math.max(0, best.winrate - wr);
-  const ptLoss = Math.max(0, best.score - sc);
+// The search entry for a move, including when the move is a mirror image
+// (twin) of a searched one on a symmetric board.
+export const entryFor = (an, move) => an.moves.find(m => m.move === move || (m.twins && m.twins.includes(move)));
+
+// How a check read's loss combines with the first estimate: 'avg' (the two are
+// equally noisy reads, so average them) or 'min' (only count what both see).
+// tools/coach-audit.js measured 'avg' as missing fewer real mistakes for the
+// same number of false alarms.
+export const GRADING = { combine: 'avg' };
+
+function classify(ptLoss, wrLoss, bestWinrate) {
   let grade;
-  if (move === best.move) grade = 'best';
-  else if (ptLoss < 1.5 && wrLoss < 0.05) grade = 'good';
+  if (ptLoss < 1.5 && wrLoss < 0.05) grade = 'good';
   else if (ptLoss < 4 && wrLoss < 0.12) grade = 'inaccuracy';
   else if (ptLoss < 10 && wrLoss < 0.3) grade = 'mistake';
   else grade = 'blunder';
   // A hopeless or totally won game: winrate barely moves; trust points more.
-  if (grade !== 'best' && ptLoss < 1.5 && (best.winrate > 0.97 || best.winrate < 0.03)) grade = 'good';
-  const alternatives = before.moves.slice(0, 3).filter(m => m.move !== move && m.visits >= before.moves[0].visits * 0.2);
-  return { grade, wrLoss, ptLoss, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover };
+  if (ptLoss < 1.5 && (bestWinrate > 0.97 || bestWinrate < 0.03)) grade = 'good';
+  return grade;
+}
+
+// Grades the move from `before` (analysis of the parent, mover to play) to
+// `after` (analysis of the position after the move).
+// `check` = { move, analysis } is an equally deep analysis of the position
+// after another move (see reviewNeeded), so the two can be compared like with
+// like: after the coach's best move, the side-by-side loss is combined with the
+// first estimate (GRADING.combine); after the runner-up to a move the coach
+// agreed with, the move loses its "best" when the runner-up turns out clearly better.
+export function gradeMove(before, after, move, check = null) {
+  if (!before || !after || !before.moves || !before.moves.length) return null;
+  const mover = before.toPlay;
+  let best = bestOf(before);
+  const entry = entryFor(before, move);
+  const isBest = !!entry && entry.move === best.move;
+  const wrAfter = 1 - after.winrate;
+  const scoreAfter = after.score * sign(mover);
+  // Take the better of "as seen from before" and "as seen from after" for the
+  // played move, so a move the first search barely looked at isn't unfairly judged.
+  const seen = entry && entry.visits >= 30 ? entry : null;
+  const wr = seen ? Math.max(wrAfter, Math.min(seen.winrate, wrAfter + 0.1)) : wrAfter;
+  const sc = seen ? Math.max(scoreAfter, Math.min(seen.score * sign(mover), scoreAfter + 3)) : scoreAfter;
+  let wrLoss = Math.max(0, best.winrate - wr);
+  let ptLoss = Math.max(0, best.score - sc);
+  // Checked side by side: the other move's score and winrate after it, minus ours.
+  const cmp = check && { pt: check.analysis.score * sign(mover) - scoreAfter, wr: (1 - check.analysis.winrate) - wrAfter };
+  let grade = isBest ? 'best' : null;
+  if (cmp && !isBest) {
+    const mix = (a, b) => GRADING.combine === 'min' ? Math.min(a, b) : (a + b) / 2;
+    wrLoss = mix(wrLoss, Math.max(0, cmp.wr));
+    ptLoss = mix(ptLoss, Math.max(0, cmp.pt));
+  } else if (cmp && (cmp.pt >= 1.5 || cmp.wr >= 0.05)) {
+    best = { move: check.move, winrate: 1 - check.analysis.winrate, score: check.analysis.score * sign(mover) };
+    wrLoss = Math.max(0, cmp.wr);
+    ptLoss = Math.max(0, cmp.pt);
+    grade = null;
+  }
+  grade = grade || classify(ptLoss, wrLoss, best.winrate);
+  // How far the read after the move fell short of what the read before it
+  // expected from the best move. Large when the first search missed something.
+  const surprise = { pt: best.score - scoreAfter, wr: best.winrate - wrAfter };
+  const alternatives = before.moves.slice(0, 3).filter(m => m !== entry && m.visits >= before.moves[0].visits * 0.2);
+  return { grade, wrLoss, ptLoss, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover, checked: !!check, surprise };
+}
+
+// A second read that should happen before a grade is shown, as the move whose
+// resulting position to analyse (passed back to gradeMove as `check`), or null
+// when the grade can stand:
+// - the move is graded worse than the coach's choice: read after that choice too;
+// - the move is the coach's choice, but the position after it looks much worse
+//   than the first read expected: read after the runner-up to see whether the
+//   first read missed a problem with the move.
+export function reviewNeeded(g, before) {
+  if (!g || g.checked) return null;
+  if (g.grade === 'best') {
+    if (g.surprise.pt < 4 && g.surprise.wr < 0.15) return null;
+    const rival = before.moves.find(m => m.move !== g.bestMove && m.move !== PASS);
+    return rival ? rival.move : null;
+  }
+  return g.grade !== 'good' && g.bestMove !== PASS ? g.bestMove : null;
 }
 
 // ------------------------------------------------------------ explanations
