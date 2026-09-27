@@ -176,3 +176,12 @@ test('a corner move claims that corner (real search)', () => {
   assert.equal(purpose.regions[0].kind, 'claims');
   assert.ok(purpose.value >= 2, `value ${purpose.value}`);
 });
+
+test('stones the opponent is expected to save are not called dead', () => {
+  // The before read counts G4 as black's, but after G3 White is expected to answer at G5.
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  const reads = { ...g3Reads(), before: read(BLACK, { own: { ...ownAll(LOWER, 0.5), G4: 0.8 } }) };
+  const t = types(moveFacts({ before, after, move: P('G3'), reads }));
+  assert.ok(t.includes('threat'));
+  assert.ok(!t.includes('deadTarget'));
+});

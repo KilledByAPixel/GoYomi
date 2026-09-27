@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, gradesMove, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -128,31 +128,6 @@ test('gradeMove: when the coach agreed with a move that then looks bad, the runn
   assert.equal(fine.grade, 'best');
   // No surprise, no check.
   assert.equal(reviewNeeded(gradeMove(before, analysis(BLACK, 0.41, -2.5, []), A), before), null);
-});
-
-test('explainMove describes captures, atari and self-atari', () => {
-  const g = new Game();
-  for (const m of 'A2 A1 B2 J9'.split(' ')) g.play(P(m));
-  const before = g.board;
-  g.play(P('B1'));
-  assert.ok(explainMove(before, g.board, P('B1')).some(s => s.startsWith('Captures 1 stone')));
-
-  const h = new Game();
-  for (const m of 'E5 D5 J9 E4'.split(' ')) h.play(P(m));
-  // Black F5? White D5 has libs C5, D6, D4... play D6 to reduce; check atari wording on a clear case:
-  const a = new Game();
-  for (const m of 'D5 E5 J9 E6 J8 E4'.split(' ')) a.play(P(m));
-  const bA = a.board;
-  a.play(P('F5')); // black F5: white E5 now has only... E5 neighbours D5(B) F5(B) E6(W) E4(W) → chain libs remain
-  const lines = explainMove(bA, a.board, P('F5'));
-  assert.ok(Array.isArray(lines) && lines.length > 0);
-
-  const s = new Game();
-  for (const m of 'B1 J9 A2 J8'.split(' ')) s.play(P(m));
-  // White playing A1 would be suicide; black's own corner. Instead: white stone self-atari at C1?
-  const bS = s.board;
-  s.play(P('B2'));
-  assert.ok(explainMove(bS, s.board, P('B2')).some(t => /Connects/.test(t)));
 });
 
 test('chooseMove: strong levels take the top move, weak ones sample', () => {

@@ -1,9 +1,8 @@
 // Win-rate / score graph along the current line of play.
-import { GRADES } from './coach.js';
 
 const W = 600, H = 150, PAD = 6;
 
-export function renderGraph(el, line, current, onPick) {
+export function renderGraph(el, line, current, onPick, mark = () => null) {
   const n = Math.max(line.length - 1, 12);
   const x = i => PAD + (i / n) * (W - 2 * PAD);
   const yWr = v => PAD + (1 - v) * (H - 2 * PAD);
@@ -16,10 +15,8 @@ export function renderGraph(el, line, current, onPick) {
     wr += `${penWr ? 'L' : 'M'}${x(i).toFixed(1)} ${yWr(an.blackWinrate).toFixed(1)} `;
     sc += `${penSc ? 'L' : 'M'}${x(i).toFixed(1)} ${yScore(an.score).toFixed(1)} `;
     penWr = penSc = true;
-    const g = node.grade;
-    if (g && (g.grade === 'mistake' || g.grade === 'blunder' || g.grade === 'inaccuracy')) {
-      dots += `<circle cx="${x(i)}" cy="${yWr(an.blackWinrate)}" r="${g.grade === 'inaccuracy' ? 3.5 : 5.5}" fill="${GRADES[g.grade].color}" stroke="#fff" stroke-width="1.5"/>`;
-    }
+    const m = mark(node);
+    if (m) dots += `<circle cx="${x(i)}" cy="${yWr(an.blackWinrate)}" r="${m.small ? 3.5 : 5.5}" fill="${m.color}" stroke="#fff" stroke-width="1.5"/>`;
   });
   const ci = line.indexOf(current);
   el.innerHTML = `

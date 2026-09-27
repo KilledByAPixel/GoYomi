@@ -1,8 +1,7 @@
 // Teaching logic that sits on top of search results: AI strength levels,
 // move choice, when to pass, dead stones, move grading and plain-language
 // explanations. Pure functions — no DOM, testable in node.
-import { BLACK, WHITE, EMPTY, EDGE, PASS, POINTS, D4, DIAG, N, ptX, ptY, ptName } from './board.js';
-import { ladderCapture, ladderThreat } from './ladder.js';
+import { BLACK, WHITE, PASS, POINTS, ptName } from './board.js';
 
 // Each level beat the one below it clearly in self-play (tools/levels.js).
 export const LEVELS = [
@@ -214,102 +213,6 @@ export function readRecipe(game, node, kind, move) {
 // Which moves the coach grades: the player's, the AI's only when asked, and
 // both sides in study mode (human === 0).
 export const gradesMove = (node, human, gradeAI) => !!node.parent && (!human || node.color === human || gradeAI);
-
-// ------------------------------------------------------------ explanations
-
-function chainLibsAfterMove(b, p) { return b.libCount(p); }
-
-// Describes what a move does tactically, comparing the board before and after.
-// before/after are Board objects; returns an array of short sentences.
-export function explainMove(before, after, move, ownBefore, ownAfter) {
-  const out = [];
-  if (move === PASS) return ['Passes.'];
-  const c = before.toPlay, o = 3 - c;
-  const who = c === BLACK ? 'Black' : 'White';
-  const x = ptX(move), y = ptY(move);
-  const height = Math.min(x, y, N - 1 - x, N - 1 - y);
-
-  const captured = POINTS.filter(p => before.color[p] === o && after.color[p] === EMPTY);
-  const wasKo = captured.length === 1 && after.ko;
-  if (captured.length) out.push(wasKo ? 'Takes the ko.' : `Captures ${captured.length} stone${captured.length > 1 ? 's' : ''}.`);
-
-  // Friendly chains that were in atari next to the move.
-  const rescued = new Set();
-  for (const d of D4) {
-    const q = move + d;
-    if (before.color[q] === c && before.inAtari(before.head[q])) rescued.add(before.head[q]);
-  }
-  const newLibs = chainLibsAfterMove(after, move);
-  if (rescued.size) {
-    const n = [...rescued].reduce((s, h) => s + before.size[h], 0);
-    const them = n === 1 ? 'it' : 'they';
-    if (newLibs >= 3) out.push(`Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.`);
-    else if (newLibs === 2) {
-      out.push(ladderThreat(after, move)
-        ? `Runs from atari, but with only 2 liberties ${them} can still be chased down in a ladder.`
-        : `Saves ${n === 1 ? 'a stone that was' : `${n} stones that were`} in atari.`);
-    } else out.push(`Tries to save ${n === 1 ? 'a stone' : `${n} stones`} in atari, but ${them} ${n === 1 ? 'is' : 'are'} still in atari.`);
-  }
-
-  // Enemy chains now in atari (that weren't before).
-  const seen = new Set();
-  let atariCount = 0, atariStones = 0, atariAt = 0;
-  for (const d of D4) {
-    const q = move + d;
-    if (after.color[q] !== o) continue;
-    const h = after.head[q];
-    if (seen.has(h)) continue;
-    seen.add(h);
-    if (after.inAtari(h) && !before.inAtari(before.head[q])) { atariCount++; atariStones += after.size[h]; atariAt = q; }
-  }
-  if (atariCount > 1) out.push('Double atari! Threatens two groups at once.');
-  else if (atariCount) {
-    const s = atariStones > 1 ? 's' : '';
-    const trapped = ladderCapture(after, atariAt);
-    out.push(`Atari: threatens to capture ${atariStones} stone${s} next move.` +
-      (trapped ? (trapped.length >= 3 ? ` Running away won't work: it's a ladder.` : ` ${atariStones > 1 ? 'They' : 'It'} can't escape.`) : ''));
-  }
-
-  // Connections and cuts.
-  const friendHeads = new Set(), enemyHeads = new Set();
-  for (const d of D4) {
-    const q = move + d;
-    if (before.color[q] === c) friendHeads.add(before.head[q]);
-    if (before.color[q] === o) enemyHeads.add(before.head[q]);
-  }
-  if (friendHeads.size >= 2) out.push(`Connects ${friendHeads.size} groups into one.`);
-  if (enemyHeads.size >= 2 && !captured.length && newLibs >= 2) out.push(`Keeps ${enemyHeads.size === 2 ? 'two' : enemyHeads.size} enemy groups apart (a cut).`);
-
-  if (newLibs === 1 && !captured.length) out.push(`Careful: this ${after.size[after.head[move]] > 1 ? 'group' : 'stone'} is now in atari — it can be captured.`);
-  else if (newLibs === 2 && after.size[after.head[move]] >= 3 && !rescued.size) out.push('The group has only 2 liberties — watch out for atari.');
-
-  if (before.isEyeish(move, c)) out.push('Fills its own eye — usually a waste, and can kill your own group.');
-
-  if (!out.length) {
-    if (enemyHeads.size && !friendHeads.size) out.push('Attaches to an enemy stone (contact play).');
-    else if (friendHeads.size && enemyHeads.size) out.push('Blocks / pushes against the opponent.');
-    else if (friendHeads.size) out.push('Extends solidly from its own stones.');
-    else {
-      let diagFriend = false;
-      for (const d of DIAG) if (before.color[move + d] === c) diagFriend = true;
-      if (diagFriend) out.push('Diagonal move — flexible shape that is hard to cut.');
-      else if (before.moveCount < 6) out.push(height >= 2 ? 'Opening move staking out a big area.' : 'An opening move this low claims little space.');
-      else out.push('Plays in open space.');
-    }
-  }
-  if (height === 0 && before.moveCount < 20 && !captured.length && !rescued.size && !atariCount) {
-    out.push('First-line moves are usually small this early in the game.');
-  }
-
-  if (ownBefore && ownAfter) {
-    let gain = 0;
-    for (let i = 0; i < POINTS.length; i++) gain += (ownAfter[i] - ownBefore[i]) * sign(c);
-    // Ownership totals count both sides, so the swing in points is about half the sum.
-    const pts = gain / 2;
-    if (pts >= 3) out.push(`Swings about ${pts.toFixed(0)} points of area to ${who}.`);
-  }
-  return out;
-}
 
 // Chains in atari and with 2 liberties — for warning overlays.
 export function threats(board) {

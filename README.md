@@ -14,8 +14,10 @@ happened, and shows you what it would have played.
   handicap stones and komi. After a lopsided game it suggests a better match.
   Play Black, White, or both sides in study mode.
 - **A coach that watches every move.** Win bar, expected score, and a grade
-  for each move with a plain-language reason. **Show** puts the coach's move
-  on the board; **Try it instead** plays it for you.
+  for each move with a plain-language reason. Set **Coach explains for** to
+  match your experience: beginners hear about liberties and captures,
+  stronger players about points, threats and plans. **Show** puts the
+  coach's move on the board; **Try it instead** plays it for you.
 - **Hints when you want them.** Ask for the best moves, or press **Their
   idea** to see what your opponent is planning and what ignoring it costs.
 - **See the board like a stronger player.** Overlays for liberties, atari

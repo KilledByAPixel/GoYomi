@@ -97,3 +97,13 @@ test('describeNote: AI moves get only the urgent facts', () => {
     { type: 'capture', stones: [P('J1')], ko: false }];
   assert.deepEqual(describeNote(f, { mover: WHITE, you: BLACK }), ['Your 2 stones at C3 are now in atari.', 'Captures your stone at J1.']);
 });
+
+test('describe: regions of the same kind share one verb', () => {
+  const f = [{ type: 'purpose', regions: [{ region: 1, kind: 'claims', points: 3 }, { region: 0, kind: 'claims', points: 2 }], value: 10 },
+    { type: 'purpose', regions: [{ region: 5, kind: 'protects', points: 3 }, { region: 2, kind: 'protects', points: 2 }], value: 9 }];
+  assert.deepEqual(describe(f, ctx('improving')), [
+    'It claims the upper side and the upper-left corner (worth about 10 points).',
+    'It secures your right side and upper-right corner (worth about 9 points).',
+  ]);
+  assert.equal(describe([f[0]], ctx('beginner'))[0], 'This claims the top of the board and the top-left corner.');
+});

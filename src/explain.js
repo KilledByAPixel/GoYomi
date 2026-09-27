@@ -187,10 +187,16 @@ export function moveFacts({ before, after, move, reads = {} }) {
   const facts = boardFacts(before, after, move);
   if (move === PASS) return facts;
   const mover = before.toPlay;
-  return [
+  const all = [
     ...facts.filter(f => f.type !== 'separates'),
     ...lookAheadFacts(before, after, move, facts, reads),
     ...threatFacts(after, move, mover, reads),
     ...purposeFacts(move, mover, reads),
   ];
+  // Stones the opponent is expected to rescue weren't dead after all: the
+  // deeper read of the position after the move outranks the one before it.
+  const dead = all.find(f => f.type === 'deadTarget'), threat = all.find(f => f.type === 'threat');
+  const sente = all.some(f => f.type === 'initiative' && f.sente);
+  if (dead && threat && sente && threat.what.stones && threat.what.stones.some(p => dead.stones.includes(p))) return all.filter(f => f !== dead);
+  return all;
 }

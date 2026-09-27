@@ -3,7 +3,9 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
-import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, gradesMove, GRADES, explainMove, threats, describeScore } from './coach.js';
+import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { boardFacts, moveFacts } from './explain.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote } from './wording.js';
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
@@ -32,6 +34,7 @@ const DEFAULTS = {
   coach: true,
   coachPlayouts: 48000,
   gradeAI: false,
+  coachFor: 'auto',
   sound: true,
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
@@ -67,6 +70,7 @@ const who = c => !settings.human ? colorName(c) : c === settings.human ? 'You' :
 const whose = c => !settings.human ? `${colorName(c)}'s` : c === settings.human ? 'Your' : 'AI\'s';
 const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
 const plural = (n, w) => `${n} ${n === 1 ? w : w.replace(/y$/, 'ie') + 's'}`;
+const coachLevel = () => resolveLevel(settings.coachFor, settings.level);
 
 function isAITurn(node = game.current) {
   const ai = aiColor();
@@ -107,7 +111,6 @@ function playMove(move) {
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   const node = game.play(move);
-  if (!node.explain) node.explain = explainMove(parent.board, node.board, move);
   hintOn = false; better = null;
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   tryGrade(node);
@@ -194,7 +197,7 @@ async function toggleThreat() {
   after.play(m.move);
   const sgn = me === BLACK ? 1 : -1;
   const cost = node.analysis ? (node.analysis.score - res.score) * sgn : null;
-  threat = { node, opp, me, move: m.move, pv: pvStones(opp, [m.move, ...(m.pv || [])]), explain: explainMove(passed, after, m.move), cost };
+  threat = { node, opp, me, move: m.move, pv: pvStones(opp, [m.move, ...(m.pv || [])]), explain: describe(boardFacts(passed, after, m.move), { level: coachLevel(), mover: opp, you: settings.human }), cost };
   render();
 }
 
@@ -353,7 +356,22 @@ function tryGrade(node) {
   }
   node.checkMove = null;
   node.grade = g;
-  node.explain = explainMove(parent.board, node.board, node.move, parent.analysis.ownership, node.analysis.ownership);
+}
+
+// What the coach knows about node's move so far (explain.js), from whatever
+// reads are done. Cached until another read arrives.
+function factsFor(node) {
+  const p = node.parent;
+  const reads = {
+    before: p.analysisDone ? p.analysis : null,
+    after: node.analysisDone ? node.analysis : null,
+    threat: node.reads && node.reads.threat,
+    baseline: node.reads && node.reads.baseline,
+  };
+  const key = ['before', 'after', 'threat', 'baseline'].map(k => reads[k] ? 1 : 0).join('');
+  if (node.facts && node.factsKey === key) return node.facts;
+  node.factsKey = key;
+  return node.facts = moveFacts({ before: p.board, after: node.board, move: node.move, reads });
 }
 
 let analysisRenderPending = false;
@@ -455,6 +473,13 @@ function tryInstead(node) {
 
 // ------------------------------------------------------------------ rendering
 
+// Graph dot for a move flagged at the current coach level.
+function graphMark(node) {
+  if (!node.grade || node.move === PASS || !isGraded(node)) return null;
+  const shown = levelGrade(node.grade, coachLevel(), factsFor(node));
+  return shown.flagged ? { color: shown.color, small: shown.key === 'inaccuracy' } : null;
+}
+
 function render() {
   renderBoard();
   renderPlayers();
@@ -462,7 +487,7 @@ function render() {
   renderScorePanel();
   renderNav();
   renderStatus();
-  renderGraph($('#graph'), game.line(), game.current, goTo);
+  renderGraph($('#graph'), game.line(), game.current, goTo, graphMark);
   renderReview();
 }
 
@@ -527,7 +552,10 @@ function renderBoard() {
   }
   if (better && better.node === node) { s.better = better.move; s.pv = better.pv; }
   if (threat && threat.node === node && threat.move) { s.threat = threat.move; s.pv = threat.pv; s.pvAccent = '#e03131'; }
-  if (sh.feedback && node.grade && ['mistake', 'blunder'].includes(node.grade.grade)) s.grade = GRADES[node.grade.grade].color;
+  if (sh.feedback && node.grade && isGraded(node)) {
+    const shown = levelGrade(node.grade, coachLevel(), factsFor(node));
+    if (shown.key === 'mistake' || shown.key === 'blunder') s.grade = shown.color;
+  }
   if (s.pv) s.liberties = false; // numbered continuation stones would be confused with liberty counts
   else s.hover = hoverInfo();
   view.render(s);
@@ -559,7 +587,7 @@ function renderCoach() {
   $('#winB').style.width = `${(bw * 100).toFixed(1)}%`;
   $('#winLabelB').textContent = an ? `Black ${Math.round(bw * 100)}%` : 'Black';
   $('#winLabelW').textContent = an ? `${Math.round((1 - bw) * 100)}% White` : 'White';
-  $('#scoreEst').innerHTML = an ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi})</span>` : '&nbsp;';
+  $('#scoreEst').innerHTML = an && coachLevel() !== 'beginner' ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi})</span>` : '&nbsp;';
 
   // Feedback on the last two moves, so against the AI you see your own move's
   // grade as well as the reply.
@@ -612,30 +640,32 @@ function renderCoach() {
 }
 
 function renderReview() {
-  const el = $('#review');
+  const el = $('#review'), level = coachLevel();
   const stats = {};
-  for (const c of [BLACK, WHITE]) stats[c] = { n: 0, loss: 0, inaccuracy: 0, mistake: 0, blunder: 0, worst: [] };
+  for (const c of [BLACK, WHITE]) stats[c] = { n: 0, loss: 0, counts: {}, worst: [] };
   for (const n of game.line()) {
     const g = n.grade;
-    if (!g || n.move === PASS) continue;
-    const s = stats[n.color];
+    if (!g || n.move === PASS || !isGraded(n)) continue;
+    const s = stats[n.color], shown = levelGrade(g, level, factsFor(n));
     s.n++;
     s.loss += Math.min(g.ptLoss, 30);
-    if (g.grade in s) s[g.grade]++;
-    if (g.grade === 'mistake' || g.grade === 'blunder') s.worst.push(n);
+    if (!shown.flagged) continue;
+    s.counts[shown.key] = (s.counts[shown.key] || 0) + 1;
+    if (shown.key !== 'inaccuracy') s.worst.push(n);
   }
   if (!stats[BLACK].n && !stats[WHITE].n) { el.innerHTML = ''; return; }
   const row = c => {
     const s = stats[c];
     if (!s.n) return '';
-    const pills = ['blunder', 'mistake', 'inaccuracy'].filter(k => s[k])
-      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${plural(s[k], GRADES[k].label.toLowerCase())}</span>`).join(' ');
+    const pills = ['blunder', 'mistake', 'inaccuracy'].filter(k => s.counts[k])
+      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${plural(s.counts[k], gradeLabel(k, level).toLowerCase())}</span>`).join(' ');
+    const avg = level === 'beginner' ? '' : `<span class="muted">avg −${(s.loss / s.n).toFixed(1)} pts/move</span>`;
     return `<div class="rv-row"><span class="stone-icon ${c === BLACK ? 'black' : 'white'}"></span><b>${who(c)}</b>` +
-      `<span class="muted">avg −${(s.loss / s.n).toFixed(1)} pts/move</span>${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
+      `${avg}${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
   };
   const worst = [...stats[BLACK].worst, ...stats[WHITE].worst].sort((a, b) => b.grade.ptLoss - a.grade.ptLoss).slice(0, 5);
-  el.innerHTML = row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>` +
-    worst.map(n => `<button class="chip" data-id="${n.id}" title="Jump to this move">#${n.depth} ${ptName(n.move)} −${n.grade.ptLoss.toFixed(0)}</button>`).join('') + '</div>' : '');
+  const chip = n => `<button class="chip" data-id="${n.id}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
+  el.innerHTML = row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '');
   el.onclick = e => {
     const node = worst.find(n => n.id === +(e.target.dataset && e.target.dataset.id));
     if (node) goTo(node);
@@ -645,25 +675,28 @@ function renderReview() {
 function moveEntry(node) {
   const latest = node === game.current;
   const head = pill => `<div class="fb-head">${pill}<span><b>${who(node.color)}</b> ${node.move === PASS ? 'passed' : `played <b>${ptName(node.move)}</b>`}</span></div>`;
-  let html = '';
+  const wrap = html => `<div class="fb-entry${latest ? ' latest' : ''}">${html}</div>`;
+  const list = lines => lines.length ? `<ul class="explain">${lines.map(t => `<li>${t}</li>`).join('')}</ul>` : '';
+  if (node.move === PASS) return wrap(head(''));
+  const level = coachLevel(), facts = factsFor(node);
+  const ctx = { level, mover: node.color, you: settings.human };
+  // Ungraded (AI) moves: just what the player has to react to.
+  if (!isGraded(node)) return wrap(head('') + list(describeNote(facts, ctx)));
   const g = node.grade;
-  if (node.move === PASS || !settings.show.feedback) html = head('');
+  let html;
+  if (!settings.show.feedback) html = head('');
   else if (!g) html = head(`<span class="pill pending">${node.checkMove != null ? 'double-checking…' : 'grading…'}</span>`);
   else {
-    const G = GRADES[g.grade];
-    html = head(`<span class="pill" style="--pill:${G.color}">${G.label}</span>`);
-    if (g.grade === 'best') html += '<p>Exactly the coach\'s choice.</p>';
-    else if (g.grade === 'good') html += g.ptLoss < 0.5 && g.wrLoss < 0.02
-      ? `<p>About as good as the coach's choice, <b>${ptName(g.bestMove)}</b>.</p>`
-      : `<p>A fine move. The coach slightly preferred <b>${ptName(g.bestMove)}</b>.</p>`;
-    else html += `<p>About <b>${g.ptLoss.toFixed(1)} points</b> worse than <b>${ptName(g.bestMove)}</b>${g.wrLoss >= 0.01 ? ` (win chance −${Math.round(g.wrLoss * 100)}%)` : ''}.</p>`;
+    ctx.shown = levelGrade(g, level, facts);
+    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
       html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}">Show ${ptName(g.bestMove)}</button>` +
         `<button data-act="try" data-id="${node.id}">Try ${ptName(g.bestMove)} instead</button></div>`;
     }
   }
-  if (node.explain && node.move !== PASS) html += `<ul class="explain">${node.explain.map(t => `<li>${t}</li>`).join('')}</ul>`;
-  return `<div class="fb-entry${latest ? ' latest' : ''}">${html}</div>`;
+  const lines = describe(facts, ctx);
+  if (settings.coach && !(node.reads && node.reads.threat && node.reads.baseline)) lines.push('<span class="muted">Reading the idea behind this move…</span>');
+  return wrap(html + list(lines));
 }
 
 // Suggests a better-matched opponent after a lopsided game. margin is black-minus-white.
@@ -785,6 +818,7 @@ function load() {
     settings.coachPlayouts = { 8000: 16000, 24000: 48000, 80000: 120000 }[settings.coachPlayouts] || settings.coachPlayouts;
     if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     settings.gradeAI = !!settings.gradeAI;
+    if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
     if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
     if (!Number.isFinite(settings.komi)) settings.komi = DEFAULTS.komi;
@@ -858,6 +892,8 @@ function setupDialog() {
 function syncOptions() {
   $('#optLevel').value = String(settings.level);
   $('#optCoach').value = String(settings.coachPlayouts);
+  $('#optCoachFor').value = settings.coachFor;
+  $('#optGradeAI').checked = settings.gradeAI;
   $('#optSound').checked = settings.sound;
   $('#toggles').querySelectorAll('input').forEach(i => { i.checked = !!settings.show[i.dataset.key]; });
 }
@@ -882,6 +918,13 @@ function setupControls() {
     for (const n of game.line()) n.analysisDone = false;
     stopCoach();
     save(); scheduleCoach();
+  };
+  $('#optCoachFor').innerHTML = COACH_FOR.map(o => `<option value="${o.key}">${o.label}</option>`).join('');
+  $('#optCoachFor').onchange = e => { settings.coachFor = e.target.value; save(); render(); };
+  $('#optGradeAI').onchange = e => {
+    settings.gradeAI = e.target.checked;
+    for (const n of game.line()) tryGrade(n);
+    save(); render(); scheduleCoach();
   };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
 

@@ -74,11 +74,14 @@ const REGION_NAMES = {
     'lower-left corner', 'lower side', 'lower-right corner'],
 };
 
-function regionPhrase(r, level, w, mover) {
-  const B = level === 'beginner', name = REGION_NAMES[B ? 'beginner' : 'other'][r.region];
-  if (r.kind === 'protects') return B ? `guards the ${name}` : `secures ${w.poss(mover)} ${name}`;
-  if (r.kind === 'reduces') return B ? `takes away some of ${w.poss(3 - mover)} area in the ${name}` : `reduces ${w.poss(3 - mover)} ${name}`;
-  return `claims the ${name}`;
+// One verb for regions of the same kind: "claims the upper side and the upper-left corner".
+function regionPhrase(regions, level, w, mover) {
+  const B = level === 'beginner', names = regions.map(r => REGION_NAMES[B ? 'beginner' : 'other'][r.region]);
+  const the = names.join(' and the '), bare = names.join(' and ');
+  const kind = regions[0].kind;
+  if (kind === 'protects') return B ? `guards the ${the}` : `secures ${w.poss(mover)} ${bare}`;
+  if (kind === 'reduces') return B ? `takes away some of ${w.poss(3 - mover)} area in the ${the}` : `reduces ${w.poss(3 - mover)} ${bare}`;
+  return `claims the ${the}`;
 }
 
 const SHAPES = {
@@ -177,7 +180,8 @@ export function describe(facts, ctx) {
         }
         break;
       case 'purpose': {
-        const what = f.regions.map(r => regionPhrase(r, level, w, mover)).join(' and ');
+        const kinds = [...new Set(f.regions.map(r => r.kind))];
+        const what = kinds.map(k => regionPhrase(f.regions.filter(r => r.kind === k), level, w, mover)).join(' and ');
         const size = B || f.value < 2 ? '' : S ? ` (+${Math.round(f.value)})` : ` (worth about ${Math.round(f.value)} points)`;
         const answered = sente && init.reply !== PASS;
         if (B) out.push(answered ? `After ${w.subj(opp)} ${w.verb(opp, 'answer', 'answers')}, this ${what}.` : `This ${what}.`);

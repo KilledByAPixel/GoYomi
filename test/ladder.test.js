@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, pt } from '../src/board.js';
 import { ladderCapture, ladderThreat } from '../src/ladder.js';
-import { explainMove } from '../src/coach.js';
+import { boardFacts } from '../src/explain.js';
+import { describe } from '../src/wording.js';
 
 // White E5 with black stones on E6, D5 and F4: a textbook ladder start.
 const START = ['.........', '.........', '.........', '....X....', '...XO....', '.....X...', '.........', '.........', '.........'];
@@ -45,6 +46,6 @@ test('explanations mention the ladder', () => {
   const before = Board.fromRows(START, BLACK);
   const after = before.clone();
   after.play(pt(5, 4)); // F5 — atari, white can only run into the ladder
-  const text = explainMove(before, after, pt(5, 4)).join(' ');
+  const text = describe(boardFacts(before, after, pt(5, 4)), { level: 'improving', mover: BLACK, you: BLACK }).join(' ');
   assert.match(text, /ladder/);
 });
