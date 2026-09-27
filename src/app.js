@@ -125,6 +125,7 @@ function playMove(move) {
 
 function onClick(p) {
   if (mode === 'score') { toggleDead(p); return; }
+  if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   if (aiNode) { flash('Hold on, the AI is thinking…'); return; }
   const node = game.current;
   if (game.isOver(node)) { flash('Both players passed. The game is over.'); return; }
@@ -143,7 +144,7 @@ function onHover(p) {
 }
 
 function humanPass() {
-  if (mode !== 'play' || aiNode || game.isOver()) return;
+  if (mode !== 'play' || aiNode || game.isOver() || resigned) return;
   if (aiColor() && !resigned && game.toPlay === aiColor()) return;
   flash(`${who(game.toPlay)} passed.`);
   playMove(PASS);
@@ -153,6 +154,8 @@ function takeBack() {
   if (mode === 'score') exitScoring();
   cancelAI();
   better = null; hintOn = false;
+  // The first take back after resigning withdraws the resignation.
+  if (resigned) { resigned = 0; flash('Resignation withdrawn. Play on!'); afterChange(); return; }
   if (!game.current.parent) return;
   playSound('undo');
   game.undo();
@@ -519,6 +522,14 @@ function graphMark(node) {
   return shown.flagged ? { color: shown.color, small: shown.key === 'inaccuracy' } : null;
 }
 
+// Replaces an element's HTML only when it changed, so a coach tick doesn't
+// rebuild buttons under the pointer (and take their focus).
+function setHTML(el, html) {
+  if (el._html === html) return;
+  el._html = html;
+  el.innerHTML = html;
+}
+
 function render() {
   renderBoard();
   renderPlayers();
@@ -626,7 +637,7 @@ function renderCoach() {
   $('#winB').style.width = `${(bw * 100).toFixed(1)}%`;
   $('#winLabelB').textContent = an ? `Black ${Math.round(bw * 100)}%` : 'Black';
   $('#winLabelW').textContent = an ? `${Math.round((1 - bw) * 100)}% White` : 'White';
-  $('#scoreEst').innerHTML = an && coachLevel() !== 'beginner' ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi}${game.handicapBonus ? ` + ${game.handicapBonus} handicap` : ''})</span>` : '&nbsp;';
+  setHTML($('#scoreEst'), an && coachLevel() !== 'beginner' ? `Expected result: <b>${describeScore(an.score)}</b> <span class="muted">(incl. komi ${game.komi}${game.handicapBonus ? ` + ${game.handicapBonus} handicap` : ''})</span>` : '&nbsp;');
 
   // Feedback on the last two moves, so against the AI you see your own move's
   // grade as well as the reply.
@@ -634,7 +645,7 @@ function renderCoach() {
   const entries = [];
   if (node.parent && node.parent.parent) entries.push(node.parent);
   if (node.parent) entries.push(node);
-  fb.innerHTML = entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`;
+  setHTML(fb, entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`);
   fb.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
     const target = entries.find(n => n.id === +e.target.dataset.id);
@@ -661,19 +672,19 @@ function renderCoach() {
       }
     }
   }
-  $('#warnings').innerHTML = warn;
+  setHTML($('#warnings'), warn);
 
   const tb = $('#threatBox');
   tb.hidden = !(threat && threat.node === node);
   if (!tb.hidden) {
-    if (threat.pending) tb.innerHTML = 'Looking at the board from the opponent\'s side…';
-    else if (threat.none) tb.innerHTML = 'The opponent has nothing urgent here.';
+    if (threat.pending) setHTML(tb, 'Looking at the board from the opponent\'s side…');
+    else if (threat.none) setHTML(tb, 'The opponent has nothing urgent here.');
     else {
       const oppName = !settings.human ? colorName(threat.opp) : threat.opp === settings.human ? 'you' : 'the AI';
-      tb.innerHTML = `<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
+      setHTML(tb, `<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
         (threat.cost >= 1 && coachLevel() !== 'beginner' ? ` Ignoring it costs about <b>${plural(Math.round(threat.cost), 'point')}</b>.` : '') + '</p>' +
         `<ul class="explain">${describe(threat.facts, { level: coachLevel(), mover: threat.opp, you: settings.human, intent: true }).map(t => `<li>${t}</li>`).join('')}</ul>` +
-        '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>';
+        '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>');
     }
   }
 }
@@ -692,7 +703,7 @@ function renderReview() {
     s.counts[shown.key] = (s.counts[shown.key] || 0) + 1;
     if (shown.key !== 'inaccuracy') s.worst.push(n);
   }
-  if (!stats[BLACK].n && !stats[WHITE].n) { el.innerHTML = ''; return; }
+  if (!stats[BLACK].n && !stats[WHITE].n) { setHTML(el, ''); return; }
   const row = c => {
     const s = stats[c];
     if (!s.n) return '';
@@ -704,7 +715,7 @@ function renderReview() {
   };
   const worst = [...stats[BLACK].worst, ...stats[WHITE].worst].sort((a, b) => b.grade.ptLoss - a.grade.ptLoss).slice(0, 5);
   const chip = n => `<button class="chip" data-id="${n.id}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
-  el.innerHTML = row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '');
+  setHTML(el, row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : ''));
   el.onclick = e => {
     const node = worst.find(n => n.id === +(e.target.dataset && e.target.dataset.id));
     if (node) goTo(node);
@@ -756,16 +767,16 @@ function renderScorePanel() {
   if (!scoring && !resigned) { el.hidden = true; return; }
   el.hidden = false;
   if (resigned && !scoring) {
-    el.innerHTML = `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${levelAdvice(resigned === BLACK ? -99 : 99)}
-      <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`;
+    setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${levelAdvice(resigned === BLACK ? -99 : 99)}
+      <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`);
   } else if (scoring.pending) {
-    el.innerHTML = '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>';
+    setHTML(el, '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>');
   } else {
     const s = game.score(scoring.dead, scoring.node);
     const winText = !s.winner ? 'A draw!' : !settings.human ? `${colorName(s.winner)} wins.` :
       s.winner === settings.human ? 'You win! 🎉' : 'The AI wins this one.';
     const tm = s.territory.margin;
-    el.innerHTML = `<h2>Game over · ${s.text}</h2>
+    setHTML(el, `<h2>Game over · ${s.text}</h2>
       <p class="big">${winText}</p>${levelAdvice(s.margin)}
       <table class="score-table">
         <tr><th></th><th>Black</th><th>White</th></tr>
@@ -776,7 +787,7 @@ function renderScorePanel() {
       </table>
       <p class="muted">Area scoring (Chinese rules). Counting territory + prisoners instead (Japanese style) gives ${tm === 0 ? 'a draw' : (tm > 0 ? 'B+' : 'W+') + Math.abs(tm)}.</p>
       <p class="muted">Squares show who owns each point. Don't agree about a dead group? Click it to switch between dead and alive.</p>
-      <div class="fb-actions"><button data-act="resume">Resume play</button><button data-act="review">Review the game</button><button data-act="new" class="primary">New game</button></div>`;
+      <div class="fb-actions"><button data-act="resume">Resume play</button><button data-act="review">Review the game</button><button data-act="new" class="primary">New game</button></div>`);
   }
   el.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
@@ -791,10 +802,10 @@ function renderNav() {
   $('#moveLabel').textContent = node.parent ? `Move ${node.depth} · ${colorName(node.color)} ${ptName(node.move)}` : 'Start';
   $('[data-nav=first]').disabled = $('[data-nav=prev]').disabled = !node.parent;
   $('[data-nav=next]').disabled = $('[data-nav=last]').disabled = !node.children.length;
-  const humanTurn = mode === 'play' && !aiNode && !game.isOver() && !(aiColor() && !resigned && game.toPlay === aiColor());
+  const humanTurn = mode === 'play' && !aiNode && !game.isOver() && !(aiColor() && !resigned && game.toPlay === aiColor()) && !resigned;
   $('#btnPass').disabled = !humanTurn;
   $('#btnUndo').disabled = !node.parent;
-  $('#btnAI').disabled = !!aiNode || mode !== 'play' || game.isOver();
+  $('#btnAI').disabled = !!aiNode || mode !== 'play' || game.isOver() || !!resigned;
   $('#btnResign').textContent = game.isOver() ? 'Count' : 'Resign';
   $('#btnResign').disabled = mode === 'score' || (!game.isOver() && (!settings.human || !!resigned));
   $('#btnHint').classList.toggle('on', hintOn);
@@ -812,7 +823,7 @@ function renderNav() {
       `<button class="chip" data-id="${s.id}">${ptName(s.move)}</button>`).join('');
   }
   const v = $('#variations');
-  v.innerHTML = html;
+  setHTML(v, html);
   v.onclick = e => {
     const id = +(e.target.dataset && e.target.dataset.id);
     const target = [...sibs, ...node.children].find(n => n.id === id);
