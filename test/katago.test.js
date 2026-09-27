@@ -54,15 +54,15 @@ test('network outputs match native KataGo on the reference positions', async () 
     }
   }
   mean.policy /= nPolicy;
-  // The reference looks computed in half precision: even the empty board, whose
-  // inputs are all but constant, is off by ~1% of each value. These bounds are a
-  // little over what that gives; any wrong input feature costs far more.
-  assert.ok(worst.policy < 0.008, `policy ${worst.policy}`);
-  assert.ok(mean.policy < 3e-4, `mean policy ${mean.policy}`);
-  assert.ok(worst.win < 0.004, `win ${worst.win}`);
-  assert.ok(worst.lead < 0.1, `lead ${worst.lead}`);
-  assert.ok(worst.own < 0.035, `ownership ${worst.own}`);
-  assert.ok(mean.own < 0.004, `mean ownership ${mean.own}`);
+  // The reference is native KataGo in full precision (openclUseFP16 = false):
+  // the port should match it to rounding. A wrong input feature costs far more.
+  console.log(`worst: policy ${worst.policy.toExponential(2)}, win ${worst.win.toExponential(2)}, lead ${worst.lead.toExponential(2)}, ownership ${worst.own.toExponential(2)}`);
+  assert.ok(worst.policy < 1e-3, `policy ${worst.policy}`);
+  assert.ok(mean.policy < 1e-4, `mean policy ${mean.policy}`);
+  assert.ok(worst.win < 2e-3, `win ${worst.win}`);
+  assert.ok(worst.lead < 0.05, `lead ${worst.lead}`);
+  assert.ok(worst.own < 5e-3, `ownership ${worst.own}`);
+  assert.ok(mean.own < 1e-3, `mean ownership ${mean.own}`);
 });
 
 // Search from a list of [point name, colour] with the given side to move.
