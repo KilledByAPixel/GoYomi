@@ -21,7 +21,10 @@ test('levelGrade: each level has its own labels and flags', () => {
   assert.deepEqual(at('improving').map(s => s.flagged), [false, false, false, true, true]);
   assert.deepEqual(at('strong').map(s => s.flagged), [false, false, true, true, true]);
   // Beginners: losing stones is a mistake even when the points lost are few.
-  assert.equal(levelGrade({ grade: 'good' }, 'beginner', [{ type: 'losesStones', stones: [P('C3')] }]).label, 'Mistake');
+  assert.equal(levelGrade({ grade: 'good', ptLoss: 2 }, 'beginner', [{ type: 'losesStones', stones: [P('C3')] }]).label, 'Mistake');
+  // ...but not when nothing better was available.
+  assert.equal(levelGrade({ grade: 'best', ptLoss: 0 }, 'beginner', [{ type: 'losesStones', stones: [P('C3')] }]).label, 'Good move');
+  assert.equal(levelGrade({ grade: 'good', ptLoss: 0.4 }, 'beginner', [{ type: 'losesStones', stones: [P('C3')] }]).label, 'Good move');
   assert.equal(levelGrade({ grade: 'good' }, 'improving', [{ type: 'losesStones', stones: [P('C3')] }]).label, 'Good');
 });
 
@@ -80,9 +83,11 @@ test('describe: a lost stone is a sacrifice only when the move was good', () => 
 
 test('describe: attacks on dead stones are not praised', () => {
   const f = [{ type: 'atari', double: false, stones: [P('D6'), P('E6')], trapped: 'net' }, { type: 'deadTarget', stones: [P('D6'), P('E6')] }];
-  const lines = describe(f, ctx('improving'));
+  const lines = describe(f, ctx('improving', { shown: { key: 'mistake', flagged: true } }));
   assert.ok(!lines.some(l => /Atari/.test(l)), lines.join(' | '));
   assert.match(lines.join(' '), /already dead/);
+  // A good move next to dead stones is neither praised nor scolded for it.
+  assert.deepEqual(describe(f, ctx('improving')), []);
   const taken = describe([{ type: 'capture', stones: [P('D6')], ko: false }, { type: 'deadTarget', stones: [P('D6')] }], ctx('improving'));
   assert.deepEqual(taken, ['Captures 1 stone that was already dead.']);
 });

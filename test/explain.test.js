@@ -185,3 +185,16 @@ test('stones the opponent is expected to save are not called dead', () => {
   assert.ok(t.includes('threat'));
   assert.ok(!t.includes('deadTarget'));
 });
+
+test('a move next to dead stones that does not attack them is not a dead target', () => {
+  // A lone dead White stone at E5 keeps 3 liberties after Black D5.
+  const before = Board.fromRows(['.........', '.........', '..XXXXX..', '..X...X..', '..X.O.X..', '..X...X..', '..XXXXX..', '.........', '.........'], BLACK);
+  const reads = { before: read(BLACK, { own: { E5: 0.8 } }), after: read(WHITE, { own: { E5: 0.9 } }) };
+  assert.ok(!types(moveFacts({ before, after: played(before, 'D5'), move: P('D5'), reads })).includes('deadTarget'));
+});
+
+test('no sente when the answer is where the opponent wanted to play anyway', () => {
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  const reads = { ...g3Reads(), baseline: read(WHITE, { score: -10, moves: [['G5']] }) };
+  assert.equal(threatFacts(after, P('G3'), BLACK, reads).find(f => f.type === 'initiative').sente, false);
+});

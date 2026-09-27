@@ -122,7 +122,8 @@ export function lookAheadFacts(before, after, move, facts, reads) {
       if (before.color[q] !== o || seen.has(before.head[q])) continue;
       seen.add(before.head[q]);
       const stones = before.chainStones(q);
-      if (avg(stones.map(p => ownOf(pre, p, c))) > 0.6) targets.push(...stones);
+      const attacked = after.color[q] !== o || after.libCount(q) <= 2;
+      if (attacked && avg(stones.map(p => ownOf(pre, p, c))) > 0.6) targets.push(...stones);
     }
     if (targets.length) out.push({ type: 'deadTarget', stones: targets });
   }
@@ -151,7 +152,9 @@ export function threatFacts(after, move, mover, reads) {
     const what = boardFacts(tb, t2, m.move).find(f => f.type === 'capture' || f.type === 'atari' || f.type === 'separates');
     if (!what) continue;
     const reply = an.moves && an.moves[0];
-    const sente = !!reply && reply.move !== PASS && (dist(reply.move, move) <= 2 || dist(reply.move, m.move) <= 1);
+    const wanted = reads.baseline && reads.baseline.moves && reads.baseline.moves.find(x => x.move !== PASS);
+    const anyway = !!wanted && wanted.move !== move && reply && reply.move !== PASS && dist(reply.move, wanted.move) <= 1;
+    const sente = !!reply && reply.move !== PASS && !anyway && (dist(reply.move, move) <= 2 || dist(reply.move, m.move) <= 1);
     return [{ type: 'threat', move: m.move, what }, { type: 'initiative', sente, reply: reply ? reply.move : PASS }];
   }
   return [];

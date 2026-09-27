@@ -34,7 +34,7 @@ export const gradeLabel = (key, level) => level === 'beginner' ? BEGINNER_LABELS
 export function levelGrade(g, level, facts = []) {
   let key = SHOWN[level][g.grade];
   // Beginners learn most from lost stones, even when few points are lost.
-  if (level === 'beginner' && key === 'good' && facts.some(f => f.type === 'losesStones')) key = 'mistake';
+  if (level === 'beginner' && key === 'good' && g.grade !== 'best' && g.ptLoss >= 1 && facts.some(f => f.type === 'losesStones')) key = 'mistake';
   return { key, label: gradeLabel(key, level), color: GRADES[key].color, flagged: key !== 'best' && key !== 'good' };
 }
 
@@ -137,6 +137,7 @@ export function describe(facts, ctx) {
       }
       case 'deadTarget': {
         if (overlaps(f.stones, capture && capture.stones)) break; // the capture line says it
+        if (!ctx.shown || !ctx.shown.flagged) break; // a fine move needn't be told off for it
         const n = f.stones.length, it = n === 1 ? 'it' : 'them', was = n === 1 ? 'was' : 'were';
         out.push(B ? `${cap(w.stones(opp, f.stones))} ${was} already trapped, so capturing ${it} can wait. Look for a bigger move.`
           : `${cap(w.stones(opp, f.stones))} ${was} already dead: attacking ${it} gains little.`);
