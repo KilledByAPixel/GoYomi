@@ -254,6 +254,9 @@ export class Game {
     const komi = Number.isFinite(km) ? km : 7;
     const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
     const game = new Game({ komi, setup: setup.length ? setup : [] });
+    // A setup stone with no liberties would be captured as it's placed: refuse
+    // rather than show a different position from the one the file describes.
+    for (const [p, c] of setup) if (game.root.board.color[p] !== c) throw invalid(`the stone at ${ptName(p)} has no liberties`);
     game.handicap = handicap;
     game.handicapBonus = handicap >= 2 ? handicap : 0;
     const pl = rootProps.PL && rootProps.PL[0].toUpperCase();
@@ -268,7 +271,17 @@ export class Game {
         const col = props.B ? BLACK : props.W ? WHITE : 0;
         if (!col) return;
         game.current = node;
-        node.board.toPlay = col; // trust the record about whose turn it is
+        // Players alternate in the game tree. The very first move decides who
+        // starts; later, a move by the player who just moved means the other passed.
+        if (col !== node.board.toPlay) {
+          if (!node.parent && !node.children.length) node.board.toPlay = col;
+          else {
+            const pass = game.play(PASS);
+            if (!pass) throw new Error('GoYomi can\'t load this record: a player moves twice where a pass would end the game.');
+            node = pass;
+            game.current = node;
+          }
+        }
         const mv = toPt((props.B || props.W)[0]);
         const child = game.play(mv);
         if (!child) throw new Error(`Illegal move in SGF: ${ptName(mv)}`);

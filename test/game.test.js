@@ -182,3 +182,41 @@ test('SGF: an invalid starting position is refused', () => {
   assert.equal(b.emptyCount, 78);
   assert.equal(empties, 78);
 });
+
+// Every node's side to move is the other colour from the move that made it.
+const alternates = g => {
+  const bad = [], walk = n => { if (n.parent && n.board.toPlay !== 3 - n.color) bad.push(ptName(n.move)); n.children.forEach(walk); };
+  walk(g.root);
+  return bad;
+};
+
+test('SGF: the same player moving twice means the other passed, and no variation is lost', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[dd])(;B[dd]))');
+  const e5 = g.root.children[0];
+  assert.equal(e5.board.toPlay, WHITE, 'the shared parent keeps White to play');
+  assert.deepEqual(e5.children.map(c => `${c.color === BLACK ? 'B' : 'W'} ${ptName(c.move)}`).sort(), ['W D6', 'W pass']);
+  const pass = e5.children.find(c => c.move === PASS);
+  assert.deepEqual(pass.children.map(c => `${c.color === BLACK ? 'B' : 'W'} ${ptName(c.move)}`), ['B D6']);
+  assert.deepEqual(alternates(g), []);
+  // The saved file keeps both lines when loaded again.
+  const h = Game.fromSGF(g.toSGF());
+  assert.equal(h.root.children[0].children.length, 2);
+  assert.deepEqual(alternates(h), []);
+});
+
+test('SGF: a same-colour variation doesn\'t change whose turn it is at the shared position', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[dd])(;B[cc]))');
+  const e5 = g.root.children[0];
+  assert.equal(e5.board.toPlay, WHITE);
+  // What the coach reads (the recipe) agrees with the board: the last move is Black's, so White is to play.
+  assert.deepEqual(g.recipe(e5).moves, [[P('E5'), BLACK]]);
+  assert.deepEqual(alternates(g), []);
+});
+
+test('SGF: the first move still decides who starts', () => {
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9];W[ee])').root.board.toPlay, WHITE);
+});
+
+test('SGF: a starting stone with no liberties is refused', () => {
+  assert.throws(() => Game.fromSGF('(;GM[1]SZ[9]AB[aa]AW[ab][ba])'), /starting position is invalid \(the stone at A9 has no liberties\)/);
+});
