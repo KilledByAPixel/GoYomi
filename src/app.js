@@ -7,7 +7,7 @@ import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, 
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
-import { linkPoints, pointReadout, movePhrase, plainText } from './access.js';
+import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, setSpeech, repeatLast, speechAvailable } from './announce.js';
 import { renderGraph } from './graph.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
@@ -67,7 +67,7 @@ const view = new BoardView($('#board'), { onClick, onHover, onCursor });
 
 // The keyboard cursor moved: say what's there.
 function onCursor(p) {
-  announce(pointReadout(game.current.board, p, q => game.check(q)), { cursor: true });
+  announce(pointReadout(game.current.board, p, q => game.check(q), mode === 'score' && scoring ? scoring.dead : null), { cursor: true });
 }
 
 // ------------------------------------------------------------------ helpers
@@ -176,6 +176,7 @@ function takeBack() {
   const ai = aiColor();
   if (ai && !resigned) while (game.current.parent && game.toPlay === ai) game.undo();
   render();
+  announce(positionPhrase(game.current.depth, game.current.color, game.current.move));
   save();
   scheduleCoach();
   // Back at the very start with the AI to move (you play White): let it move again.
@@ -466,6 +467,7 @@ async function enterScoring() {
   if (node.scoredDead) { // counted before: keep the player's dead/alive corrections
     scoring.dead = new Set(node.scoredDead);
     scoring.pending = false;
+    save();
     render();
     return;
   }
@@ -482,7 +484,7 @@ async function enterScoring() {
   scoring.pending = false;
   save();
   const s0 = game.score(scoring.dead, node);
-  announce(s0.winner ? `Game over. ${colorName(s0.winner)} wins by ${Math.abs(s0.margin)} points.` : 'Game over. A draw.');
+  announce(`Game over. ${resultPhrase(s0.winner, s0.margin)}`);
   playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
   render();
   $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
@@ -499,6 +501,8 @@ function toggleDead(p) {
   for (const s of b.chainStones(p)) on ? scoring.dead.add(s) : scoring.dead.delete(s);
   scoring.node.scoredDead = new Set(scoring.dead);
   save();
+  const s = game.score(scoring.dead, scoring.node);
+  announce(`${on ? 'Marked dead' : 'Marked alive'}. ${resultPhrase(s.winner, s.margin)}`);
   render();
 }
 
@@ -518,6 +522,7 @@ function goTo(node) {
   better = null; hintOn = false;
   game.goTo(node);
   save(); render(); scheduleCoach();
+  announce(positionPhrase(node.depth, node.color, node.move));
   aiMove(); // back at the newest position with the AI to move (only fires on a leaf)
 }
 
@@ -683,8 +688,10 @@ function renderCoach() {
   if (node.parent) entries.push(node);
   setHTML(fb, linkPoints(entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`));
   fb.onclick = e => {
-    const act = e.target.dataset && e.target.dataset.act;
-    const target = entries.find(n => n.id === +e.target.dataset.id);
+    const btn = e.target.closest && e.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    const target = entries.find(n => n.id === +btn.dataset.id);
     if (!target) return;
     if (act === 'show') showBetter(target);
     if (act === 'try') tryInstead(target);
@@ -742,7 +749,8 @@ function renderReview() {
   const chip = n => `<button class="chip" data-id="${n.id}" data-pt="${n.move}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
   setHTML(el, linkPoints(row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '')));
   el.onclick = e => {
-    const node = worst.find(n => n.id === +(e.target.dataset && e.target.dataset.id));
+    const chip = e.target.closest && e.target.closest('[data-id]');
+    const node = chip && worst.find(n => n.id === +chip.dataset.id);
     if (node) goTo(node);
   };
 }

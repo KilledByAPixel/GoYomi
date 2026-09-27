@@ -11,16 +11,16 @@ export function linkPoints(html) {
 
 const WHY = { ko: 'ko', superko: 'it would repeat an earlier position', suicide: 'it would have no liberties', occupied: 'occupied' };
 
-// What's at p, for the keyboard cursor.
-export function pointReadout(board, p, check) {
+// What's at p, for the keyboard cursor (and, while counting, whether it's marked dead).
+export function pointReadout(board, p, check, dead = null) {
   const name = ptName(p), c = board.color[p];
   if (c === EMPTY) {
     const r = check(p);
     return r.ok ? `${name}, empty` : `${name}, empty, can't play: ${WHY[r.reason] || r.reason}`;
   }
   const color = c === BLACK ? 'black' : 'white', size = board.chainStones(p).length, libs = board.libCount(p);
-  const l = `${libs} ${libs === 1 ? 'liberty' : 'liberties'}`;
-  return size === 1 ? `${name}, ${color} stone, ${l}` : `${name}, ${color} stone, group of ${size} with ${l}`;
+  const l = `${libs} ${libs === 1 ? 'liberty' : 'liberties'}`, marked = dead && dead.has(p) ? ', marked dead' : '';
+  return size === 1 ? `${name}, ${color} stone${marked}, ${l}` : `${name}, ${color} stone${marked}, group of ${size} with ${l}`;
 }
 
 // "You played D4.", "AI played F5, capturing 2 stones.", "Black passed."
@@ -30,3 +30,17 @@ export function movePhrase(who, move, captured) {
 }
 
 export const plainText = html => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+// "Move 12, White E5.", "Start."
+export function positionPhrase(depth, color, move) {
+  if (!depth) return 'Start.';
+  const who = color === BLACK ? 'Black' : 'White';
+  return move === PASS ? `Move ${depth}, ${who} passed.` : `Move ${depth}, ${who} ${ptName(move)}.`;
+}
+
+// "Black wins by 3.5 points.", "A draw."
+export function resultPhrase(winner, margin) {
+  if (!winner) return 'A draw.';
+  const m = Math.abs(margin);
+  return `${winner === BLACK ? 'Black' : 'White'} wins by ${m} ${m === 1 ? 'point' : 'points'}.`;
+}

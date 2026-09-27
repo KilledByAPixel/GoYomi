@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Board, BLACK, PASS, parsePt } from '../src/board.js';
+import { Board, BLACK, WHITE, PASS, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { linkPoints, pointReadout, movePhrase, plainText } from '../src/access.js';
+import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from '../src/access.js';
 
 const P = parsePt;
 const span = n => `<span class="pt" data-pt="${P(n)}">${n}</span>`;
@@ -29,4 +29,19 @@ test('movePhrase and plainText', () => {
   assert.equal(movePhrase('AI', P('F5'), 2), 'AI played F5, capturing 2 stones.');
   assert.equal(movePhrase('Black', PASS, 0), 'Black passed.');
   assert.equal(plainText('About <b>6.2 points</b>\n worse than <b>D4</b>.'), 'About 6.2 points worse than D4.');
+});
+
+test('pointReadout says which stones are marked dead while counting', () => {
+  const b = Board.fromRows(['.........', '.........', '.........', '.........', '....X....', '.........', '.........', '.........', '.........'], BLACK);
+  assert.equal(pointReadout(b, P('E5'), () => ({ ok: true }), new Set([P('E5')])), 'E5, black stone, marked dead, 4 liberties');
+  assert.equal(pointReadout(b, P('E5'), () => ({ ok: true }), new Set()), 'E5, black stone, 4 liberties');
+});
+
+test('positionPhrase and resultPhrase', () => {
+  assert.equal(positionPhrase(0, 0, PASS), 'Start.');
+  assert.equal(positionPhrase(12, WHITE, P('E5')), 'Move 12, White E5.');
+  assert.equal(positionPhrase(3, BLACK, PASS), 'Move 3, Black passed.');
+  assert.equal(resultPhrase(BLACK, 1), 'Black wins by 1 point.');
+  assert.equal(resultPhrase(WHITE, -3.5), 'White wins by 3.5 points.');
+  assert.equal(resultPhrase(0, 0), 'A draw.');
 });
