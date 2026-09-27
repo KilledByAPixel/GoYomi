@@ -115,7 +115,7 @@ export class BoardView {
     const x = Math.max(0, Math.min(N - 1, ptX(this.cursor) + dx)), y = Math.max(0, Math.min(N - 1, ptY(this.cursor) + dy));
     this.cursor = pt(x, y);
     this.drawCursor();
-    this.onHover(this.cursor); // the same preview a mouse gets
+    this.onHover(this.cursor, true); // the same preview a mouse gets
     if (this.onCursor) this.onCursor(this.cursor);
   }
 

@@ -8,7 +8,7 @@ import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
-import { initAnnouncer, announce, speak, setSpeech, repeatLast, speechAvailable } from './announce.js';
+import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
 import { renderGraph } from './graph.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
@@ -47,6 +47,7 @@ let mode = 'play';           // 'play' | 'score'
 let scoring = null;          // { node, dead: Set, pending }
 let resigned = 0;            // colour that resigned
 let hoverPt = null;
+let hoverByKey = false;      // hoverPt is the keyboard cursor, whose readout already says why a point can't be played
 let hintOn = false;
 let better = null;           // { node, move, pv } — coach move shown on node's board
 let flashMsg = null, flashTimer = 0;
@@ -117,14 +118,20 @@ function afterChange() {
   aiMove();
 }
 
-function playMove(move) {
+// human: the player's own move, which cuts off anything still being spoken.
+// news: shown and said in place of the usual move announcement (passes).
+function playMove(move, { human = false, news = '' } = {}) {
   const parent = game.current;
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
+  if (human) hush(); // a new move: they're done listening
   const node = game.play(move);
-  // Say the move; for ungraded (AI) moves add what the player must react to.
-  const note = isGraded(node) ? [] : describeNote(factsFor(node).filter(f => f.type !== 'capture'), { mover: node.color, you: settings.human });
-  announce([movePhrase(who(node.color), move, node.captured.length), ...note].join(' '));
+  if (news) flash(news);
+  else {
+    // Say the move; for ungraded (AI) moves add what the player must react to.
+    const note = isGraded(node) ? [] : describeNote(factsFor(node).filter(f => f.type !== 'capture'), { mover: node.color, you: settings.human });
+    announce([movePhrase(who(node.color), move, node.captured.length), ...note].join(' '));
+  }
   hintOn = false; better = null;
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
@@ -148,11 +155,11 @@ function onClick(p) {
     flash('It\'s the AI\'s turn in this position. Press "AI move" to let it play, or step back.');
     return;
   }
-  playMove(p);
+  playMove(p, { human: true });
 }
 
-function onHover(p) {
-  hoverPt = p;
+function onHover(p, byKey = false) {
+  hoverPt = p; hoverByKey = byKey;
   renderBoard();
   renderStatus();
 }
@@ -160,17 +167,17 @@ function onHover(p) {
 function humanPass() {
   if (mode !== 'play' || aiNode || game.isOver() || resigned) return;
   if (aiColor() && !resigned && game.toPlay === aiColor()) return;
-  flash(`${who(game.toPlay)} passed.`);
-  playMove(PASS);
+  playMove(PASS, { human: true, news: `${who(game.toPlay)} passed.` });
 }
 
 function takeBack() {
+  // Nothing to take back at the start: leave the AI's first move alone.
+  if (!game.current.parent && !resigned) return;
   if (mode === 'score') exitScoring();
   cancelAI();
   better = null; hintOn = false;
   // The first take back after resigning withdraws the resignation.
   if (resigned) { resigned = 0; flash('Resignation withdrawn. Play on!'); afterChange(); return; }
-  if (!game.current.parent) return;
   playSound('undo');
   game.undo();
   const ai = aiColor();
@@ -262,11 +269,12 @@ async function aiMove(force = false, best = false) {
   if (move !== PASS && !game.check(move).ok) {
     move = (results.allMoves || results.moves).map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
   }
+  let news = '';
   if (move === PASS) {
     const who = best ? 'The coach' : aiLabel();
-    flash(node.board.lastMove === PASS ? `${who} passes too.` : `${who} passes. If you think the game is finished, pass as well.`);
+    news = node.board.lastMove === PASS ? `${who} passes too.` : `${who} passes. If you think the game is finished, pass as well.`;
   }
-  playMove(move);
+  playMove(move, { news });
 }
 
 // ------------------------------------------------------------------ coach
@@ -458,36 +466,33 @@ function onAnalysis(node) {
 
 // ------------------------------------------------------------------ scoring
 
-async function enterScoring() {
+// restored: reopened on page load, so no sound or scrolling.
+async function enterScoring(restored = false) {
   const node = game.current;
   cancelAI();
   mode = 'score';
-  scoring = { node, dead: new Set(), pending: true };
+  const mine = scoring = { node, dead: new Set(), pending: true };
   render();
-  if (node.scoredDead) { // counted before: keep the player's dead/alive corrections
-    scoring.dead = new Set(node.scoredDead);
-    scoring.pending = false;
-    save();
-    render();
-    return;
+  if (node.scoredDead) scoring.dead = new Set(node.scoredDead); // counted before: keep the player's dead/alive corrections
+  else {
+    let an = node.analysisDone ? node.analysis : null;
+    if (!an) {
+      stopCoach();
+      an = await coach.search(game.recipe(node), { playouts: 8000, reportMs: 0 });
+      if (an) { node.analysis = preferUsefulMove(an); node.analysisDone = true; tryGrade(node); }
+    }
+    if (scoring !== mine) return; // left, or a newer count took over (and cancelled this search)
+    scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
+    if (!an) flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
+    node.scoredDead = new Set(scoring.dead);
   }
-  let an = node.analysisDone ? node.analysis : null;
-  if (!an) {
-    stopCoach();
-    an = await coach.search(game.recipe(node), { playouts: 8000, reportMs: 0 });
-    if (an) { node.analysis = preferUsefulMove(an); node.analysisDone = true; tryGrade(node); }
-  }
-  if (!scoring || scoring.node !== node) return;
-  scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
-  if (!an) flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
-  node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
   save();
   const s0 = game.score(scoring.dead, node);
   announce(`Game over. ${resultPhrase(s0.winner, s0.margin)}`);
-  playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
+  if (!restored) playSound(settings.human && s0.winner !== settings.human ? 'lose' : 'win');
   render();
-  $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
+  if (!restored) $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
   scheduleCoach();
 }
 
@@ -520,6 +525,7 @@ function goTo(node) {
   cancelAI();
   if (mode === 'score') exitScoring();
   better = null; hintOn = false;
+  locatePt = null; // the button it came from may be rebuilt without a focusout
   game.goTo(node);
   save(); render(); scheduleCoach();
   announce(positionPhrase(node.depth, node.color, node.move));
@@ -550,7 +556,7 @@ function tryInstead(node) {
   if (!g || !node.parent) return;
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   goTo(node.parent);
-  playMove(g.bestMove);
+  playMove(g.bestMove, { human: true });
 }
 
 // ------------------------------------------------------------------ rendering
@@ -563,11 +569,17 @@ function graphMark(node) {
 }
 
 // Replaces an element's HTML only when it changed, so a coach tick doesn't
-// rebuild buttons under the pointer (and take their focus).
+// rebuild buttons under the pointer (and take their focus). A focused button
+// that is rebuilt (same id, or same data-act and data-id) keeps the focus.
 function setHTML(el, html) {
   if (el._html === html) return;
   el._html = html;
+  const f = document.activeElement;
+  const sel = f && f !== el && el.contains(f) && (f.id ? `#${CSS.escape(f.id)}`
+    : ['act', 'id'].filter(k => f.dataset && f.dataset[k]).map(k => `[data-${k}="${CSS.escape(f.dataset[k])}"]`).join(''));
   el.innerHTML = html;
+  const again = sel && el.querySelector(sel);
+  if (again) again.focus({ preventScroll: true });
 }
 
 function render() {
@@ -869,7 +881,7 @@ function renderStatus() {
   let text = '', kind = '';
   const node = game.current;
   const h = mode === 'play' && hoverPt !== null ? hoverInfo() : null;
-  if (h && !h.ok) { text = reasonText(h.reason); kind = 'bad'; }
+  if (h && !h.ok && !hoverByKey) { text = reasonText(h.reason); kind = 'bad'; }
   else if (flashMsg) { text = flashMsg.text; kind = flashMsg.kind; }
   else if (scoring) text = scoring.pending ? 'Counting…' : 'Click groups to mark them dead or alive.';
   else if (aiNode) text = aiBest ? 'Finding the best move…' : `${aiLabel()} is thinking…`;
@@ -1102,7 +1114,7 @@ setSoundEnabled(settings.sound);
 setSpeech(settings.speak);
 syncOptions();
 afterChange();
-if (restoreScoring && restoreScoring === game.current) enterScoring();
+if (restoreScoring && restoreScoring === game.current) enterScoring(true);
 
 // Handy for debugging from the console.
 window.dojo = {

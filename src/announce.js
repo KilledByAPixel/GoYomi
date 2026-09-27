@@ -51,8 +51,21 @@ function next() {
   speechSynthesis.speak(utt);
 }
 
+// The navigation buttons' symbols, in words: a voice reads ▶ as "black right-pointing triangle".
+const SYMBOLS = [[/◀\s*▶/g, 'the back and forward buttons'], [/◀/g, 'the back button'], [/▶/g, 'the forward button'],
+  [/⏮/g, 'the start button'], [/⏭/g, 'the latest button']];
+export const sayable = text => SYMBOLS.reduce((t, [re, w]) => t.replace(re, w), text);
+
+// Stops whatever is being said and drops what's waiting: the player moved, so it's old news.
+export function hush() {
+  if (!speaking) return;
+  queue = []; current = null;
+  speechSynthesis.cancel();
+}
+
 export function speak(text, cursor = false) {
   if (!speaking || !text) return;
+  text = sayable(text);
   // Some browsers lose onend: an idle synthesiser means nothing is really being spoken.
   if (current && !speechSynthesis.speaking && !speechSynthesis.pending) current = null;
   if (cursor) {

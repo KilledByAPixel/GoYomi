@@ -83,3 +83,42 @@ test('speech: long announcements are spoken a sentence at a time (Chrome cuts of
   assert.deepEqual(spoken.map(u => u.text), ['Coach: Good move.', 'It claims the corner (worth about 3.5 points).']);
   setSpeech(false);
 });
+
+test('hush: a new move cuts off what is being said and what is waiting', async () => {
+  const { hush } = await import('../src/announce.js');
+  hush(); // speech off: nothing to do
+  spoken.length = 0;
+  speechSynthesis.speaking = true;
+  setSpeech(true);
+  announce('Coach: Good move. It claims the corner. It also makes eyes.');
+  const old = spoken.at(-1);
+  hush();
+  assert.equal(spoken.length, 0, 'cancelled');
+  old.onend(); // browsers end the cancelled utterance: the dropped sentences must not start
+  assert.equal(spoken.length, 0);
+  announce('You played E5.');
+  announce('AI played F5.');
+  assert.deepEqual(spoken.map(u => u.text), ['You played E5.'], 'the move itself is spoken normally');
+  spoken.at(-1).onend();
+  assert.deepEqual(spoken.map(u => u.text), ['You played E5.', 'AI played F5.'], 'and the reply after it');
+  setSpeech(false);
+});
+
+test('speech says the navigation symbols in words; the screen keeps them', async () => {
+  const { sayable } = await import('../src/announce.js');
+  assert.equal(sayable('Review: step through with ◀ ▶ or click the graph.'), 'Review: step through with the back and forward buttons or click the graph.');
+  assert.equal(sayable('Click to try it, or ▶ to go back.'), 'Click to try it, or the forward button to go back.');
+  assert.equal(sayable('⏮ ◀ ⏭'), 'the start button the back button the latest button');
+  await tick(); // let earlier tests' announcements land
+  const region = { textContent: '' };
+  initAnnouncer(region);
+  spoken.length = 0;
+  speechSynthesis.speaking = false;
+  setSpeech(true);
+  announce('Or ▶ to go back.');
+  assert.deepEqual(spoken.map(u => u.text), ['Or the forward button to go back.']);
+  await tick();
+  assert.equal(region.textContent, 'Or ▶ to go back.');
+  speechSynthesis.speaking = true;
+  setSpeech(false);
+});
