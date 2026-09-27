@@ -56,15 +56,30 @@ export function boardFacts(before, after, move) {
     if (before.color[q] === c) friends.add(before.head[q]);
     if (before.color[q] === o && !enemies.has(before.head[q])) enemies.set(before.head[q], q);
   }
-  if (friends.size >= 2) out.push({ type: 'connect', groups: friends.size });
+  // Pairs of orthogonal neighbours at right angles: q1 and q2 are diagonal to
+  // each other, and far is the fourth corner of their 2×2 square with the move.
+  const corners = [];
+  for (const d1 of D4) for (const d2 of D4) if (d1 < d2 && d1 !== -d2) corners.push([move + d1, move + d2, move + d1 + d2]);
+  // Two groups touching diagonally with the other point between them empty were
+  // connected already: whichever side the opponent pushes in, the other connects.
+  const diagonalLink = friends.size === 2 && corners.some(([q1, q2, far]) =>
+    before.color[q1] === c && before.color[q2] === c && before.head[q1] !== before.head[q2] && before.color[far] === EMPTY);
+  if (diagonalLink) out.push({ type: 'alreadyConnected' });
+  else if (friends.size >= 2) out.push({ type: 'connect', groups: friends.size });
   // Only a candidate: whether it really cuts depends on how play goes on (lookAheadFacts).
   if (enemies.size >= 2 && !captured.length && libs >= 2) out.push({ type: 'separates', at: [...enemies.values()] });
 
   if (libs === 1 && !captured.length) out.push({ type: 'selfAtari', stones: size });
   else if (libs === 2 && size >= 3 && !rescued.size) out.push({ type: 'fewLibs', stones: size });
   if (before.isEyeish(move, c)) out.push({ type: 'ownEye' });
+  // Empty triangle: three stones in an L with the fourth point of their square empty.
+  const triangle = corners.some(qs => {
+    const s = qs.map(q => after.color[q]);
+    return s.filter(v => v === c).length === 2 && s.includes(EMPTY);
+  });
+  if (triangle) out.push({ type: 'emptyTriangle' });
 
-  if (!out.some(f => f.type !== 'separates')) {
+  if (!out.some(f => f.type !== 'separates' && f.type !== 'emptyTriangle')) {
     let shape;
     if (enemies.size && !friends.size) shape = 'contact';
     else if (friends.size && enemies.size) shape = 'block';

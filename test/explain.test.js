@@ -21,10 +21,31 @@ test('boardFacts: a capture', () => {
 
 test('boardFacts: connecting two groups', () => {
   const g = new Game();
-  for (const m of 'B1 J9 A2 J8'.split(' ')) g.play(P(m));
+  for (const m of 'A2 J9 C2 J8'.split(' ')) g.play(P(m));
   const before = g.board;
   g.play(P('B2'));
   assert.equal(boardFacts(before, g.board, P('B2')).find(f => f.type === 'connect').groups, 2);
+});
+
+test('boardFacts: filling a diagonal connection is an empty triangle, not a connection', () => {
+  // Black D5 and E6 touch diagonally; E5 fills one of the two points between them.
+  const diag = Board.fromRows(['.........', '.........', '.........', '....X....', '...X.....', '.........', '.........', '.........', '.........'], BLACK);
+  const facts = types(boardFacts(diag, played(diag, 'E5'), P('E5')));
+  assert.ok(facts.includes('alreadyConnected') && facts.includes('emptyTriangle'), facts.join());
+  assert.ok(!facts.includes('connect'));
+  // With White already on D6 the diagonal was cut: E5 is a real connection, and a solid shape.
+  const cut = Board.fromRows(['.........', '.........', '.........', '...OX....', '...X.....', '.........', '.........', '.........', '.........'], BLACK);
+  const real = boardFacts(cut, played(cut, 'E5'), P('E5'));
+  assert.equal(real.find(f => f.type === 'connect').groups, 2);
+  assert.deepEqual(types(real).filter(t => t === 'alreadyConnected' || t === 'emptyTriangle'), []);
+});
+
+test('boardFacts: an empty triangle from a single group', () => {
+  // Black D5 and D6; E5 makes an L with E6 empty.
+  const pair = Board.fromRows(['.........', '.........', '.........', '...X.....', '...X.....', '.........', '.........', '.........', '.........'], BLACK);
+  assert.deepEqual(types(boardFacts(pair, played(pair, 'E5'), P('E5'))), ['emptyTriangle', 'shape']);
+  // Extending in a straight line is not one.
+  assert.deepEqual(types(boardFacts(pair, played(pair, 'D4'), P('D4'))), ['shape']);
 });
 
 test('boardFacts: atari, with the ladder read', () => {

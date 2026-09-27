@@ -149,6 +149,18 @@ export function describe(facts, ctx) {
         break;
       }
       case 'connect': out.push(`Connects ${f.groups} groups into one.`); break;
+      case 'alreadyConnected': {
+        if (!ctx.shown) break; // a needless connection or a solid one depends on the grade
+        if (!ctx.shown.flagged) out.push('Makes the diagonal connection solid.');
+        else out.push(B ? `${cap(w.poss(mover))} stones were already safely connected diagonally. Filling in between them makes a clumsy shape called an empty triangle.`
+          : `${cap(w.poss(mover))} stones were already connected diagonally, so connecting here makes an empty triangle.`);
+        break;
+      }
+      case 'emptyTriangle':
+        if (!ctx.shown || !ctx.shown.flagged || find('alreadyConnected')) break;
+        out.push(B ? 'Makes an empty triangle: three stones bunched in an L. It\'s a slow shape with few liberties.'
+          : 'Makes an empty triangle, an inefficient shape.');
+        break;
       case 'cut': out.push(B ? `Cuts ${w.poss(opp)} stones into separate groups, which makes them weaker.` : `Cuts ${w.poss(opp)} stones apart.`); break;
       case 'stoneLost': {
         if (!ctx.shown) break; // sacrifice or loss depends on the grade
@@ -169,8 +181,12 @@ export function describe(facts, ctx) {
       case 'ownEye': out.push(B ? 'Fills its own eye. A group needs two eyes to live, so this can kill it.'
         : `Fills its own eye — usually a waste, and can kill ${mover === ctx.you ? 'your' : 'its'} own group.`); break;
       case 'separates': if (ctx.intent) out.push(`Aims to cut ${w.poss(opp)} stones apart.`); break;
-      case 'shape': if (!threat && !purpose && !find('cut') && !(ctx.intent && find('separates'))) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]); break;
-      case 'firstLine': out.push('First-line moves are usually small this early in the game.'); break;
+      case 'shape': {
+        const badShape = find('emptyTriangle') && ctx.shown && ctx.shown.flagged; // don't call it solid as well
+        if (!threat && !purpose && !find('cut') && !(ctx.intent && find('separates')) && !badShape) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]);
+        break;
+      }
+      case 'firstLine': if (ctx.shown && ctx.shown.flagged) out.push('First-line moves are usually small this early in the game.'); break;
       case 'threat': {
         const t = f.what;
         const what = t.type === 'capture' ? `capture ${w.stones(opp, t.stones)}`
