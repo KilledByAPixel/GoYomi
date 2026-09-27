@@ -197,6 +197,24 @@ export function preferUsefulMove(an) {
   return an;
 }
 
+// The position a coach read looks at, as a Game recipe, for node's move:
+// 'pos' node's position; 'check' the parent position after `move` (to check
+// node's grade against); 'threat' node's position with the opponent passing;
+// 'baseline' the parent position with the mover passing (explain.js).
+export function readRecipe(game, node, kind, move) {
+  if (kind === 'pos') return game.recipe(node);
+  const recipe = game.recipe(kind === 'threat' ? node : node.parent);
+  const extra = kind === 'check' ? [move, node.color] : [PASS, kind === 'threat' ? 3 - node.color : node.color];
+  recipe.moves = [...recipe.moves, extra];
+  // An imagined pass must not end the game after a real one.
+  if (kind !== 'check') recipe.resetPasses = true;
+  return recipe;
+}
+
+// Which moves the coach grades: the player's, the AI's only when asked, and
+// both sides in study mode (human === 0).
+export const gradesMove = (node, human, gradeAI) => !!node.parent && (!human || node.color === human || gradeAI);
+
 // ------------------------------------------------------------ explanations
 
 function chainLibsAfterMove(b, p) { return b.libCount(p); }

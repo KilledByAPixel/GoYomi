@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, gradesMove, GRADING, explainMove, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -229,4 +229,36 @@ test('preferUsefulMove: a move inside settled territory gives way to an equal re
     { move: P('E5'), visits: 400, winrate: 0.6, score: -2.8 },
   ] };
   assert.equal(preferUsefulMove(white).moves[0].move, P('E5'));
+});
+
+test('readRecipe: pass reads add the pass for the right side and never end the game', () => {
+  const g = new Game({ handicap: 2 }); // white moves first
+  g.play(P('E5')); // white
+  const b = g.play(P('D3')); // black (C3 and G7 hold the handicap stones)
+  const threat = readRecipe(g, b, 'threat');
+  assert.deepEqual(threat.moves.at(-1), [PASS, WHITE]);
+  assert.equal(threat.moves.length, 3);
+  assert.equal(threat.resetPasses, true);
+  const base = readRecipe(g, b, 'baseline');
+  assert.deepEqual(base.moves.at(-1), [PASS, BLACK]);
+  assert.equal(base.moves.length, 2);
+  assert.equal(base.resetPasses, true);
+  const check = readRecipe(g, b, 'check', P('D4'));
+  assert.deepEqual(check.moves.at(-1), [P('D4'), BLACK]);
+  assert.equal(check.resetPasses, false);
+  assert.deepEqual(readRecipe(g, b, 'pos'), g.recipe(b));
+  // Right after a real pass, the imagined one still resets the pass count.
+  const p = g.play(PASS), m = g.play(P('F6'));
+  assert.equal(readRecipe(g, m, 'baseline').resetPasses, true);
+  assert.equal(readRecipe(g, p, 'threat').resetPasses, true);
+});
+
+test('gradesMove: the player\'s moves, and AI moves only when asked', () => {
+  const g = new Game();
+  const b = g.play(P('E5')), w = g.play(P('C3'));
+  assert.equal(gradesMove(b, BLACK, false), true);
+  assert.equal(gradesMove(w, BLACK, false), false);
+  assert.equal(gradesMove(w, BLACK, true), true);
+  assert.equal(gradesMove(w, 0, false), true, 'study mode: both colours');
+  assert.equal(gradesMove(g.root, BLACK, true), false);
 });

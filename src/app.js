@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool } from './engine-client.js';
-import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, GRADES, explainMove, threats, describeScore } from './coach.js';
+import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, gradesMove, GRADES, explainMove, threats, describeScore } from './coach.js';
 import { BoardView } from './view.js';
 import { ladderCapture } from './ladder.js';
 import { renderGraph } from './graph.js';
@@ -31,6 +31,7 @@ const DEFAULTS = {
   handicap: 0,
   coach: true,
   coachPlayouts: 48000,
+  gradeAI: false,
   sound: true,
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
@@ -220,7 +221,7 @@ async function aiMove(force = false, best = false) {
   let results = best && node.analysisDone ? node.analysis
     : await opponent.search(game.recipe(node), { playouts: lv.playouts, maxTime: 15000, reportMs: 0 });
   if (token !== aiToken) return;
-  if (best && results && !node.analysisDone) { node.analysis = results; node.analysisDone = true; tryGrade(node); }
+  if (best && results && !node.analysisDone) { node.analysis = preferUsefulMove(results); node.analysisDone = true; tryGrade(node); }
   // When the human has passed, decide about passing with a deeper look.
   let passInfo = results;
   if (results && node.board.lastMove === PASS && node.parent) {
@@ -247,31 +248,43 @@ async function aiMove(force = false, best = false) {
 
 // ------------------------------------------------------------------ coach
 
-// Coach work items: { node } reads node's position; { node, move } reads the
-// position after `move` from node's parent, to check node's grade against.
-const workKey = w => w.move == null ? `${w.node.id}` : `${w.node.id}:${w.move}`;
+// Coach work items: { node, kind, move? } (see readRecipe for the kinds).
+const workKey = w => `${w.node.id}:${w.kind}:${w.move ?? ''}`;
+const isGraded = node => gradesMove(node, settings.human, settings.gradeAI);
 const checkRead = (node, move) => node.checks && node.checks.get(move) ||
   (node.parent.children.find(ch => ch.move === move && ch.analysisDone) || {}).analysis;
 
-// A node's outstanding coach work, most urgent first.
+// A node's outstanding grading work, most urgent first.
 function coachWork(node, out, ahead) {
   if (!node) return;
-  if (!node.analysisDone) out.push({ node });
-  else if (node.checkMove != null) out.push({ node, move: node.checkMove });
+  if (!node.analysisDone) out.push({ node, kind: 'pos' });
+  if (!node.parent || !isGraded(node)) return;
+  if (node.checkMove != null) out.push({ node, kind: 'check', move: node.checkMove });
   // Moves other than the coach's choice often need the check read against it:
   // start it early, on a spare engine, so the grade doesn't wait for two reads.
-  if (ahead && !node.grade && node.parent && node.parent.analysisDone && node.checkMove == null) {
+  else if (ahead && !node.grade && node.parent.analysisDone) {
     const e = entryFor(node.parent.analysis, node.move), best = node.parent.analysis.moves[0];
-    if (best && best.move !== PASS && e !== best && !checkRead(node, best.move)) out.push({ node, move: best.move });
+    if (best && best.move !== PASS && e !== best && !checkRead(node, best.move)) out.push({ node, kind: 'check', move: best.move });
   }
 }
 
-// The coach's to-do list: the current position and the one before it (needed
-// to grade the latest move), then the rest of the game outwards from here.
+// The threat and baseline reads behind a graded move's explanation (explain.js).
+function explainWork(node, out) {
+  if (!node || !node.parent || node.move === PASS || !isGraded(node)) return;
+  const r = node.reads || {};
+  if (!r.threat) out.push({ node, kind: 'threat' });
+  if (!r.baseline) out.push({ node, kind: 'baseline' });
+}
+
+// The coach's to-do list: grading the current move and the one before it,
+// explaining them (they're what the coach panel shows), then grading the rest
+// of the game outwards from here.
 function coachQueue(max) {
   const cur = game.current, out = [];
   coachWork(cur, out, true);
   coachWork(cur.parent, out, true);
+  explainWork(cur, out);
+  if (cur.parent && cur.parent.parent) explainWork(cur.parent, out);
   const line = game.line(), idx = line.indexOf(cur);
   for (let d = 1; d < line.length && out.length < max; d++) {
     coachWork(line[idx - 1 - d], out);
@@ -300,24 +313,19 @@ function scheduleCoach() {
 
 function startCoachJob(i, w) {
   const job = coachJobs[i] = w, node = w.node;
-  let recipe;
-  if (w.move != null) {
-    recipe = game.recipe(node.parent);
-    recipe.moves = [...recipe.moves, [w.move, node.color]];
-  } else recipe = game.recipe(node);
-  coach.engines[i].search(recipe, {
+  coach.engines[i].search(readRecipe(game, node, w.kind, w.move), {
     playouts: settings.coachPlayouts,
     // A slow device gets a shallower read rather than a long wait (desktops run ~7k playouts/s).
     maxTime: settings.coachPlayouts / 2.5,
     onProgress: (res, done) => {
-      if (w.move != null) {
-        if (!done) return;
+      if (w.kind === 'pos') {
+        node.analysis = res;
+        if (done) { node.analysisDone = true; preferUsefulMove(res); }
+      } else if (!done) return;
+      else if (w.kind === 'check') {
         (node.checks = node.checks || new Map()).set(w.move, res);
         if (node.checkMove === w.move) node.checkMove = null;
-      } else {
-        node.analysis = res;
-        if (done) node.analysisDone = true;
-      }
+      } else (node.reads = node.reads || {})[w.kind] = res;
       onAnalysis(node);
     },
   }).then(res => {
@@ -335,7 +343,7 @@ function stopCoach() {
 // read first (reviewNeeded) waits for it; scheduleCoach picks that up.
 function tryGrade(node) {
   const parent = node.parent;
-  if (!parent || node.grade || !parent.analysisDone || !node.analysisDone) return;
+  if (!parent || node.grade || !isGraded(node) || !parent.analysisDone || !node.analysisDone) return;
   let g = gradeMove(parent.analysis, node.analysis, node.move);
   const other = reviewNeeded(g, parent.analysis);
   if (other != null) {
@@ -776,6 +784,7 @@ function load() {
     // Quick / Normal / Deep were 8k / 24k / 80k before the coach read each position in one tree.
     settings.coachPlayouts = { 8000: 16000, 24000: 48000, 80000: 120000 }[settings.coachPlayouts] || settings.coachPlayouts;
     if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
+    settings.gradeAI = !!settings.gradeAI;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
     if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
     if (!Number.isFinite(settings.komi)) settings.komi = DEFAULTS.komi;
