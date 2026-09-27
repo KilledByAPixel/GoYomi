@@ -50,6 +50,7 @@ let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
 let coachJobs = [];          // per coach engine: the work item it is reading (see coachQueue)
+let restoreScoring = null;   // a counting screen to reopen after loading
 let threat = null;           // { node, pending | none | move, pv, facts, cost } — opponent's idea
 
 const opponent = new Engine('opponent');
@@ -455,6 +456,7 @@ async function enterScoring() {
   if (!an) flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
   node.scoredDead = new Set(scoring.dead);
   scoring.pending = false;
+  save();
   playSound(settings.human && game.score(scoring.dead, node).winner !== settings.human ? 'lose' : 'win');
   render();
   $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
@@ -470,6 +472,7 @@ function toggleDead(p) {
   const on = !scoring.dead.has(p);
   for (const s of b.chainStones(p)) on ? scoring.dead.add(s) : scoring.dead.delete(s);
   scoring.node.scoredDead = new Set(scoring.dead);
+  save();
   render();
 }
 
@@ -846,11 +849,17 @@ function renderStatus() {
 
 // ------------------------------------------------------------------ persistence
 
+// Child-index path from the root to node.
+const pathOf = node => { const p = []; for (let n = node; n.parent; n = n.parent) p.unshift(n.parent.children.indexOf(n)); return p; };
+
 function save() {
   try {
-    const path = [];
-    for (let n = game.current; n.parent; n = n.parent) path.unshift(n.parent.children.indexOf(n));
-    localStorage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF(), path, resigned }));
+    // Every counted position keeps the player's dead/alive marks.
+    const dead = [];
+    const walk = n => { if (n.scoredDead) dead.push({ path: pathOf(n), points: [...n.scoredDead] }); n.children.forEach(walk); };
+    walk(game.root);
+    localStorage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF(), path: pathOf(game.current), resigned, dead,
+      scoring: mode === 'score' && scoring ? pathOf(scoring.node) : null }));
   } catch { /* storage unavailable */ }
 }
 
@@ -873,6 +882,13 @@ function load() {
     for (const i of d.path || []) { if (!n.children[i]) break; n = n.children[i]; }
     game.goTo(n);
     resigned = d.resigned || 0;
+    const at = path => { let n = game.root; for (const i of path || []) { if (!n.children[i]) return null; n = n.children[i]; } return n; };
+    for (const e of d.dead || []) {
+      const n = at(e.path);
+      // Only stones actually on that board can be marked dead.
+      if (n) n.scoredDead = new Set((e.points || []).filter(p => n.board.color[p] === BLACK || n.board.color[p] === WHITE));
+    }
+    restoreScoring = d.scoring ? at(d.scoring) : null;
     return true;
   } catch (e) {
     console.warn('Could not restore saved game', e);
@@ -962,7 +978,7 @@ function setupControls() {
     if (scoring && scoring.pending) { e.target.value = String(settings.coachPlayouts); return; }
     settings.coachPlayouts = +e.target.value;
     // Re-read positions at the new depth.
-    const reset = n => { n.analysisDone = false; n.after = null; n.reads = null; n.checkMove = null; n.children.forEach(reset); };
+    const reset = n => { n.analysisDone = false; n.after = null; n.reads = null; n.checkMove = null; n.grade = null; n.children.forEach(reset); };
     reset(game.root);
     stopCoach();
     save(); scheduleCoach();
@@ -1031,6 +1047,7 @@ if (!load()) game = new Game({ komi: settings.komi, handicap: settings.handicap 
 setSoundEnabled(settings.sound);
 syncOptions();
 afterChange();
+if (restoreScoring && restoreScoring === game.current) enterScoring();
 
 // Handy for debugging from the console.
 window.dojo = {
