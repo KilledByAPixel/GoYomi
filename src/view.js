@@ -6,7 +6,7 @@ const CELL = 100, M = 72, S = M * 2 + CELL * (N - 1);
 const X = p => M + ptX(p) * CELL, Y = p => M + ptY(p) * CELL;
 const COLS = 'ABCDEFGHJ';
 const R = 47.5;
-const RED = '#e03131', ORANGE = '#f08c00', GREEN = '#2f9e61';
+const RED = '#e03131', ORANGE = '#f08c00', GREEN = '#2f9e61', BLUE = '#1c7ed6';
 
 function woodGrain() {
   let s = 11;
@@ -205,6 +205,9 @@ export class BoardView {
         hints += `<circle cx="${X(mv.move)}" cy="${Y(mv.move)}" r="${R}" fill="url(#${mv.color === BLACK ? 'gB' : 'gW'})" opacity="0.72"/>` +
           `<text x="${X(mv.move)}" y="${Y(mv.move) + 2}" class="stone-num" fill="${i === 0 ? (s.pvAccent || GREEN) : ink(mv.color)}" font-size="42">${i + 1}</text>`;
       });
+    }
+    if (s.locate != null && s.locate !== PASS) {
+      hints += `<circle class="locate" cx="${X(s.locate)}" cy="${Y(s.locate)}" r="${R + 8}" fill="none" stroke="${BLUE}" stroke-width="8" stroke-dasharray="4 12" stroke-linecap="round"/>`;
     }
     this.layers.hints.innerHTML = hints;
 

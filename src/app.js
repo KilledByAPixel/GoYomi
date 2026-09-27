@@ -7,6 +7,7 @@ import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, 
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
+import { linkPoints } from './access.js';
 import { renderGraph } from './graph.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
@@ -51,6 +52,7 @@ let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
 let coachJobs = [];          // per coach engine: the work item it is reading (see coachQueue)
 let restoreScoring = null;   // a counting screen to reopen after loading
+let locatePt = null;         // a point the player is hovering in the coach's text
 let threat = null;           // { node, pending | none | move, pv, facts, cost } — opponent's idea
 
 const opponent = new Engine('opponent');
@@ -617,6 +619,7 @@ function renderBoard() {
   }
   if (s.pv) s.liberties = false; // numbered continuation stones would be confused with liberty counts
   else s.hover = hoverInfo();
+  if (locatePt !== null) s.locate = locatePt;
   view.render(s);
 }
 
@@ -654,7 +657,7 @@ function renderCoach() {
   const entries = [];
   if (node.parent && node.parent.parent) entries.push(node.parent);
   if (node.parent) entries.push(node);
-  setHTML(fb, entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`);
+  setHTML(fb, linkPoints(entries.length ? entries.map(moveEntry).join('') : `<p class="tip">${openingTip()}</p>`));
   fb.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
     const target = entries.find(n => n.id === +e.target.dataset.id);
@@ -670,7 +673,7 @@ function renderCoach() {
     warn = atariWarnings(b, p => game.check(p), { whose: c => whose(c), who: c => who(c) })
       .map(w => `<li class="${w.kind}">${w.text}</li>`).join('');
   }
-  setHTML($('#warnings'), warn);
+  setHTML($('#warnings'), linkPoints(warn));
 
   const tb = $('#threatBox');
   tb.hidden = !(threat && threat.node === node);
@@ -679,10 +682,10 @@ function renderCoach() {
     else if (threat.none) setHTML(tb, 'The opponent has nothing urgent here.');
     else {
       const oppName = !settings.human ? colorName(threat.opp) : threat.opp === settings.human ? 'you' : 'the AI';
-      setHTML(tb, `<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
+      setHTML(tb, linkPoints(`<p><b>Their idea:</b> if ${!settings.human ? colorName(threat.me) : threat.me === settings.human ? 'you' : 'the AI'} played somewhere else, ${oppName} would play <b>${ptName(threat.move)}</b>.` +
         (threat.cost >= 1 && coachLevel() !== 'beginner' ? ` Ignoring it costs about <b>${plural(Math.round(threat.cost), 'point')}</b>.` : '') + '</p>' +
         `<ul class="explain">${describe(threat.facts, { level: coachLevel(), mover: threat.opp, you: settings.human, intent: true }).map(t => `<li>${t}</li>`).join('')}</ul>` +
-        '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>');
+        '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>'));
     }
   }
 }
@@ -712,8 +715,8 @@ function renderReview() {
       `${avg}${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
   };
   const worst = [...stats[BLACK].worst, ...stats[WHITE].worst].sort((a, b) => b.grade.ptLoss - a.grade.ptLoss).slice(0, 5);
-  const chip = n => `<button class="chip" data-id="${n.id}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
-  setHTML(el, row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : ''));
+  const chip = n => `<button class="chip" data-id="${n.id}" data-pt="${n.move}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
+  setHTML(el, linkPoints(row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '')));
   el.onclick = e => {
     const node = worst.find(n => n.id === +(e.target.dataset && e.target.dataset.id));
     if (node) goTo(node);
@@ -738,8 +741,8 @@ function moveEntry(node) {
     ctx.shown = levelGrade(g, level, facts);
     html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
-      html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}">Show ${ptName(g.bestMove)}</button>` +
-        `<button data-act="try" data-id="${node.id}">Try ${ptName(g.bestMove)} instead</button></div>`;
+      html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}" data-pt="${g.bestMove}">Show ${ptName(g.bestMove)}</button>` +
+        `<button data-act="try" data-id="${node.id}" data-pt="${g.bestMove}">Try ${ptName(g.bestMove)} instead</button></div>`;
     }
   }
   const lines = describe(facts, ctx);
@@ -991,6 +994,16 @@ function setupControls() {
     save(); render(); scheduleCoach();
   };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
+  // Hovering (or focusing) a point the coach mentions circles it on the board.
+  const locate = p => { if (p !== locatePt) { locatePt = p; renderBoard(); } };
+  const ptOf = el => { const t = el && el.closest ? el.closest('[data-pt]') : null; return t ? +t.dataset.pt : null; };
+  for (const id of ['#feedback', '#warnings', '#threatBox', '#review']) {
+    const box = $(id);
+    box.addEventListener('pointerover', e => locate(ptOf(e.target)));
+    box.addEventListener('pointerout', e => { if (ptOf(e.relatedTarget) === null) locate(null); });
+    box.addEventListener('focusin', e => locate(ptOf(e.target)));
+    box.addEventListener('focusout', () => locate(null));
+  }
 
   $('#btnPass').onclick = humanPass;
   $('#btnUndo').onclick = takeBack;
