@@ -4,6 +4,7 @@
 import { BLACK, WHITE, PASS, POINTS, ptName } from './board.js';
 
 // Each level beat the one below it clearly in self-play (tools/levels.js).
+// The last runs on KataGo instead of the built-in engine.
 export const LEVELS = [
   { name: 'Pebble', blurb: 'Plays almost at random. Practise capturing.', playouts: 50, temp: 1, blunder: 0.3 },
   { name: 'Seedling', blurb: 'Grabs captures, wanders a lot.', playouts: 220, temp: 1.2, blunder: 0.14 },
@@ -13,6 +14,8 @@ export const LEVELS = [
   { name: 'River', blurb: 'Solid fighting on a small board.', playouts: 5000, temp: 5, blunder: 0 },
   { name: 'Mountain', blurb: 'Strong. Punishes overplays.', playouts: 16000, temp: 0, blunder: 0 },
   { name: 'Dragon', blurb: 'Full strength. Thinks for several seconds.', playouts: 60000, temp: 0, blunder: 0 },
+  // KataGo's network at a fixed number of visits (Dragon stands in where it can't run).
+  { name: 'Phoenix', blurb: 'KataGo\'s neural network. Far beyond Dragon.', katago: true, visits: 128, fallback: 7, playouts: 60000, temp: 0, blunder: 0 },
 ];
 
 const sign = c => c === BLACK ? 1 : -1;

@@ -127,3 +127,110 @@ export class EnginePool {
 
   get busy() { return !!this.pending; }
 }
+
+// ------------------------------------------------------------------ KataGo
+
+// Built-in playouts per KataGo visit when a caller asks for a read "worth" so
+// many playouts: 48k (the coach's Normal depth) becomes 400 visits. At that
+// ratio the net's reads grade at least as well as the built-in ones (see
+// tools/coach-audit.js).
+export const PLAYOUTS_PER_VISIT = 120;
+// Below this many evaluations per second a device can't give the coach a
+// Quick read (133 visits) in about 5 seconds, so the built-in engine is used.
+export const MIN_RATE = 25;
+// At this speed or better a read gets its full visits; slower devices get
+// proportionally fewer.
+export const FULL_RATE = 150;
+
+// The one worker that runs the network for every KataGo engine.
+export class KataWorker {
+  constructor() {
+    this.worker = new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' });
+    this.engines = new Map();
+    this.info = null;
+    this.ready = new Promise(resolve => { this.resolveReady = resolve; });
+    this.worker.onmessage = e => {
+      const msg = e.data;
+      if (msg.type === 'ready' || msg.type === 'failed') {
+        this.info = msg.type === 'ready' ? { ok: true, backend: msg.backend, rate: msg.rate, batch: msg.batch }
+          : { ok: false, message: msg.message };
+        this.resolveReady(this.info);
+        return;
+      }
+      const eng = this.engines.get(msg.engine);
+      if (eng) eng.onMessage(msg);
+    };
+    this.worker.onerror = e => {
+      const message = e.message || 'failed to load';
+      if (!this.info) { this.info = { ok: false, message }; this.resolveReady(this.info); }
+      for (const eng of this.engines.values()) eng.fail();
+    };
+  }
+  load(backend) { this.worker.postMessage({ type: 'load', backend }); return this.ready; }
+  post(msg) { this.worker.postMessage(msg); }
+
+  // Visits for a read worth `playouts` built-in playouts on this device.
+  visits(playouts) {
+    const speed = this.info && this.info.ok ? Math.min(1, this.info.rate / FULL_RATE) : 1;
+    return Math.max(8, Math.round(playouts / PLAYOUTS_PER_VISIT * speed));
+  }
+}
+
+// A KataGo search handle with the same interface as Engine. `playouts` asks
+// for a read worth that many built-in playouts (see KataWorker.visits); pass
+// `visits` to set the count directly. Results have playouts = visits.
+export class KataEngine {
+  constructor(name, host) {
+    this.name = name;
+    this.host = host;
+    this.nextId = 1;
+    this.pending = null;
+    host.engines.set(name, this);
+  }
+
+  search(position, { playouts = 10000, visits = 0, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
+    this.cancel();
+    const id = this.nextId++;
+    return new Promise(resolve => {
+      this.pending = { id, resolve, onProgress };
+      this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), maxTime, reportMs });
+    });
+  }
+
+  cancel() {
+    if (!this.pending) return;
+    this.host.post({ type: 'stop', engine: this.name });
+    this.pending.resolve(null);
+    this.pending = null;
+  }
+
+  fail() { const job = this.pending; this.pending = null; if (job) job.resolve(null); }
+
+  get busy() { return !!this.pending; }
+
+  onMessage(msg) {
+    const job = this.pending;
+    if (!job || msg.id !== job.id) return;
+    if (msg.type === 'progress') { if (job.onProgress) job.onProgress(msg.results); return; }
+    if (msg.type === 'done') {
+      this.pending = null;
+      if (job.onProgress && msg.results) job.onProgress(msg.results, true);
+      job.resolve(msg.results);
+    }
+  }
+}
+
+// Same interface as EnginePool. The network already shares one worker, so a
+// pooled search is a single deeper search rather than several merged ones.
+export class KataPool {
+  constructor(name, size, host) {
+    this.engines = Array.from({ length: size }, (_, i) => new KataEngine(`${name}${i}`, host));
+  }
+  search(position, opts) { this.cancel(); return this.engines[0].search(position, opts); }
+  cancel() { for (const e of this.engines) e.cancel(); }
+  get busy() { return this.engines.some(e => e.busy); }
+}
+
+// How much reading went into results, in built-in playouts, so thresholds
+// such as "at least 1500 playouts" mean the same for both engines.
+export const effort = r => r ? (r.engine === 'katago' ? r.playouts * PLAYOUTS_PER_VISIT : r.playouts) : 0;
