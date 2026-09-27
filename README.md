@@ -18,6 +18,10 @@ happened, and shows you what it would have played.
   match your experience: beginners hear about liberties and captures,
   stronger players about points, threats and plans. **Show** puts the
   coach's move on the board; **Try it instead** plays it for you.
+- **Play by keyboard or by ear.** Tab to the board and play with the arrow
+  keys and Enter. Screen readers hear every move and the coach's comments,
+  or turn on **Speak announcements** to have them read aloud. Hover any
+  point the coach mentions to see where it is on the board.
 - **Hints when you want them.** Ask for the best moves, or press **Their
   idea** to see what your opponent is planning and what ignoring it costs.
 - **See the board like a stronger player.** Overlays for liberties, atari
