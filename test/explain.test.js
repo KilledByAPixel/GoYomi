@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, parsePt, ptName } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { boardFacts, moveFacts, regionOf } from '../src/explain.js';
+import { boardFacts, moveFacts, threatFacts, purposeFacts, regionOf } from '../src/explain.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -117,4 +117,62 @@ test('stones the coach expected to live but now expects to die are lost', () => 
   const after = played(before, 'J9');
   const reads = { before: read(BLACK, { own: { C3: 0.5 } }), after: read(WHITE, { own: { C3: -0.8, J9: 0.5 } }) };
   assert.deepEqual(moveFacts({ before, after, move: P('J9'), reads }).find(f => f.type === 'losesStones').stones.map(ptName), ['C3']);
+});
+
+// The tester's example: G3 ataris White's G4, whose only liberty is then G5.
+const G3 = ['.........', '.........', '.........', '.........', '.........', '.....XOX.', '.........', '.........', '.........'];
+const LOWER = ['D3', 'E3', 'F3', 'D2', 'E2', 'F2', 'D1', 'E1', 'F1'];
+const ownAll = (names, v) => Object.fromEntries(names.map(n => [n, v]));
+const g3Reads = (threatMoves = [['C7', 3, [], 800], ['G5', 4, [], 500]]) => ({
+  before: read(BLACK, { own: ownAll(LOWER, 0.5) }),
+  after: read(WHITE, { score: -2, own: ownAll(LOWER, 0.8), moves: [['G5', -2]] }),
+  threat: read(BLACK, { moves: threatMoves }),
+  baseline: read(WHITE, { score: -10, moves: [['G3']] }),
+});
+
+test('threatFacts: the best local follow-up that captures, and sente when they answer', () => {
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  const facts = threatFacts(after, P('G3'), BLACK, g3Reads());
+  const threat = facts.find(f => f.type === 'threat');
+  assert.equal(ptName(threat.move), 'G5');
+  assert.equal(threat.what.type, 'capture');
+  assert.deepEqual(threat.what.stones.map(ptName), ['G4']);
+  assert.deepEqual(facts.find(f => f.type === 'initiative'), { type: 'initiative', sente: true, reply: P('G5') });
+});
+
+test('threatFacts: no threat from a quiet or distant follow-up', () => {
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  assert.deepEqual(threatFacts(after, P('G3'), BLACK, g3Reads([['G2', 4, [], 500]])), []);
+  assert.deepEqual(threatFacts(after, P('G3'), BLACK, g3Reads([['C7', 3, [], 800]])), []);
+});
+
+test('purposeFacts: which regions the move gains, and what the opponent would otherwise play', () => {
+  const facts = purposeFacts(P('G3'), BLACK, g3Reads());
+  const purpose = facts.find(f => f.type === 'purpose');
+  assert.equal(purpose.regions.length, 1);
+  assert.equal(purpose.regions[0].region, regionOf(P('E2')));
+  assert.equal(purpose.regions[0].kind, 'protects');
+  assert.ok(Math.abs(purpose.regions[0].points - 3.6) < 1e-9);
+  assert.equal(purpose.value, 8);
+  assert.deepEqual(facts.find(f => f.type === 'otherwise'), { type: 'otherwise', move: P('G3') });
+});
+
+test('moveFacts includes threat and purpose once their reads are in', () => {
+  const before = Board.fromRows(G3, BLACK), after = played(before, 'G3');
+  const t = types(moveFacts({ before, after, move: P('G3'), reads: g3Reads() }));
+  for (const k of ['atari', 'threat', 'initiative', 'purpose', 'otherwise']) assert.ok(t.includes(k), k);
+});
+
+test('a corner move claims that corner (real search)', () => {
+  const before = Board.fromRows(['.........', '.........', '.........', '.........', '.........', '.........', '..X......', '.........', '.........'], BLACK);
+  const run = b => { const s = new Search(b, { komi: 7 }); s.run(6000); return s.results(20); };
+  seed(1);
+  const base = before.clone();
+  base.play(PASS);
+  base.passes = 0;
+  const reads = { before: run(before), after: run(played(before, 'G3')), baseline: run(base) };
+  const purpose = purposeFacts(P('G3'), BLACK, reads).find(f => f.type === 'purpose');
+  assert.equal(purpose.regions[0].region, regionOf(P('G3')));
+  assert.equal(purpose.regions[0].kind, 'claims');
+  assert.ok(purpose.value >= 2, `value ${purpose.value}`);
 });

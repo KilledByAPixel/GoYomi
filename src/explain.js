@@ -133,9 +133,64 @@ export function lookAheadFacts(before, after, move, facts, reads) {
   return out;
 }
 
+// What the move threatens: the most-read follow-up near it that captures,
+// ataris or cuts, if the opponent ignored the move (reads.threat), and
+// whether the opponent is expected to answer it (sente). No point value: on
+// an open board any second move is worth ~10 points, so a number misleads.
+export function threatFacts(after, move, mover, reads) {
+  const an = reads.after, th = reads.threat;
+  if (!an || !th || move === PASS) return [];
+  const list = th.allMoves || th.moves || [];
+  const top = list.length ? list[0].visits : 0;
+  const tb = after.clone();
+  tb.play(PASS);
+  for (const m of list) {
+    if (m.move === PASS || dist(m.move, move) > 3 || m.visits < top * 0.05 || !tb.isLegal(m.move)) continue;
+    const t2 = tb.clone();
+    t2.play(m.move);
+    const what = boardFacts(tb, t2, m.move).find(f => f.type === 'capture' || f.type === 'atari' || f.type === 'separates');
+    if (!what) continue;
+    const reply = an.moves && an.moves[0];
+    const sente = !!reply && reply.move !== PASS && (dist(reply.move, move) <= 2 || dist(reply.move, m.move) <= 1);
+    return [{ type: 'threat', move: m.move, what }, { type: 'initiative', sente, reply: reply ? reply.move : PASS }];
+  }
+  return [];
+}
+
+// What the move is for: where it gains against not playing it (reads.baseline,
+// the mover passing instead), whether that protects, reduces or claims area
+// (by who owned it in reads.before), how much the move is worth, and what the
+// opponent would otherwise have played. Ownership gains are spread thin, so
+// the regions say where and the score difference says how much.
+export function purposeFacts(move, mover, reads) {
+  const an = reads.after, base = reads.baseline, pre = reads.before, out = [];
+  if (!an || !base || !pre || move === PASS) return out;
+  const s = sign(mover);
+  const gain = new Array(9).fill(0), owned = new Array(9).fill(0);
+  POINTS.forEach((p, i) => {
+    const r = regionOf(p);
+    gain[r] += (an.ownership[i] - base.ownership[i]) * s / 2;
+    owned[r] += pre.ownership[i] * s / 9;
+  });
+  const order = [...gain.keys()].filter(r => gain[r] >= 1).sort((a, b) => gain[b] - gain[a]);
+  const regions = order.filter((r, k) => k === 0 || (k === 1 && gain[r] >= gain[order[0]] / 2))
+    .map(r => ({ region: r, points: gain[r], kind: owned[r] > 0.3 ? 'protects' : owned[r] < -0.3 ? 'reduces' : 'claims' }));
+  const value = (an.score - base.score) * s;
+  if (regions.length) out.push({ type: 'purpose', regions, value });
+  const other = base.moves && base.moves.find(m => m.move !== PASS);
+  if (other && value >= 2) out.push({ type: 'otherwise', move: other.move });
+  return out;
+}
+
 // Everything the coach can say about a move with the reads it has so far.
 export function moveFacts({ before, after, move, reads = {} }) {
   const facts = boardFacts(before, after, move);
   if (move === PASS) return facts;
-  return [...facts.filter(f => f.type !== 'separates'), ...lookAheadFacts(before, after, move, facts, reads)];
+  const mover = before.toPlay;
+  return [
+    ...facts.filter(f => f.type !== 'separates'),
+    ...lookAheadFacts(before, after, move, facts, reads),
+    ...threatFacts(after, move, mover, reads),
+    ...purposeFacts(move, mover, reads),
+  ];
 }
