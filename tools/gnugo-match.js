@@ -20,8 +20,8 @@
 // Each game is scored by the opponent engine's final_score under area rules,
 // as an independent referee. GoYomi's own count is recorded too; disagreements
 // are shown. GoYomi moves exactly as the app's AI does: same search, playouts
-// and move choice. KataGo plays GoYomi's rules: area scoring, positional
-// superko, no suicide.
+// and move choice. KataGo plays GoYomi's rules: Chinese area scoring (dead
+// stones removed at the end), positional superko, no suicide.
 import { spawn, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
@@ -107,7 +107,11 @@ async function playGame(index) {
       '--komi', String(opts.komi), '--level', String(opts.gnulevel), '--seed', String(index + 1)]);
   await gnu.send('boardsize 9');
   await gnu.send('clear_board');
-  if (opts.katago) await gnu.send('kata-set-rules koPOSITIONALscoreAREAtaxNONEsui0button0');
+  if (opts.katago) {
+    // Chinese rules count dead stones as captured when both pass ("friendly pass");
+    // a bare area rule set would count the board as it stands. Then GoYomi's ko rule.
+    for (const cmd of ['kata-set-rules chinese', 'kata-set-rule ko POSITIONAL', 'kata-set-rule whiteHandicapBonus 0']) await gnu.send(cmd);
+  }
   await gnu.send(`komi ${opts.komi}`);
 
   const game = new Game({ komi: opts.komi });
