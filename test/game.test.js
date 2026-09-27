@@ -154,3 +154,31 @@ test('handicap compensation survives an SGF round trip', () => {
   assert.equal(h.recipe().komi, 2.5);
   assert.equal(Game.fromSGF('(;GM[1]SZ[9]KM[0.5]HA[1]AB[ee])').handicapBonus, 0, 'HA below 2 is no handicap');
 });
+
+test('SGF: a move in the first node is played', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9]B[ee];W[dd])');
+  assert.deepEqual(g.line().slice(1).map(n => ptName(n.move)), ['E5', 'D6']);
+});
+
+test('SGF: White to play survives a round trip without setup stones', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9]PL[W])');
+  assert.equal(g.root.board.toPlay, WHITE);
+  assert.equal(Game.fromSGF(g.toSGF()).root.board.toPlay, WHITE);
+});
+
+test('SGF: adding or removing stones during the game is refused', () => {
+  assert.throws(() => Game.fromSGF('(;GM[1]SZ[9];B[ee];AE[ee]AW[dd];B[cc])'), /add or remove stones during the game/);
+});
+
+test('SGF: an invalid starting position is refused', () => {
+  for (const sgf of ['(;GM[1]SZ[9]AB[aa][aa])', '(;GM[1]SZ[9]AB[aa]AW[aa])', '(;GM[1]SZ[9]AB[tt])', '(;GM[1]SZ[9]AB[])', '(;GM[1]SZ[9]AB[zz])']) {
+    assert.throws(() => Game.fromSGF(sgf), /starting position is invalid/, sgf);
+  }
+  // A valid setup still loads, with the board's bookkeeping intact.
+  const g = Game.fromSGF('(;GM[1]SZ[9]AB[aa][bb]AW[cc])');
+  const b = g.root.board;
+  let empties = 0;
+  for (let p = 0; p < b.color.length; p++) if (b.color[p] === EMPTY) empties++;
+  assert.equal(b.emptyCount, 78);
+  assert.equal(empties, 78);
+});

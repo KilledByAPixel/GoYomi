@@ -168,7 +168,7 @@ export class Game {
     const ab = this.setup.filter(([, c]) => c === BLACK), aw = this.setup.filter(([, c]) => c === WHITE);
     if (ab.length) s += 'AB' + ab.map(([p]) => `[${coord(p)}]`).join('');
     if (aw.length) s += 'AW' + aw.map(([p]) => `[${coord(p)}]`).join('');
-    if (this.setup.length) s += `PL[${this.root.board.toPlay === WHITE ? 'W' : 'B'}]`;
+    if (this.setup.length || this.root.board.toPlay === WHITE) s += `PL[${this.root.board.toPlay === WHITE ? 'W' : 'B'}]`;
     if (this.root.comment) s += `C[${esc(this.root.comment)}]`;
     const walk = node => {
       let out = '';
@@ -237,8 +237,19 @@ export class Game {
       return pt(x, y);
     };
     const setup = [];
-    for (const v of rootProps.AB || []) setup.push([toPt(v), BLACK]);
-    for (const v of rootProps.AW || []) setup.push([toPt(v), WHITE]);
+    // Validate the starting position before any stone is placed.
+    const invalid = why => new Error(`This SGF's starting position is invalid (${why}).`);
+    const seen = new Set();
+    const addSetup = (v, c) => {
+      let p;
+      try { p = toPt(v); } catch { throw invalid(`"${v}" is not on the board`); }
+      if (p === PASS) throw invalid(`"${v}" is not a point`);
+      if (seen.has(p)) throw invalid(`${ptName(p)} is listed twice`);
+      seen.add(p);
+      setup.push([p, c]);
+    };
+    for (const v of rootProps.AB || []) addSetup(v, BLACK);
+    for (const v of rootProps.AW || []) addSetup(v, WHITE);
     const km = parseFloat(((rootProps.KM || [])[0] || '').replace(',', '.'));
     const komi = Number.isFinite(km) ? km : 7;
     const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
@@ -249,11 +260,13 @@ export class Game {
     if (pl === 'W' || pl === 'B') game.root.board.toPlay = pl === 'W' ? WHITE : BLACK;
     else if (handicap && setup.length) game.root.board.toPlay = WHITE; // handicap: White moves first
     if (rootProps.C) game.root.comment = rootProps.C[0];
-    const apply = (seq, from) => {
+    const apply = (seq, from, first) => {
       let node = from;
-      for (const props of seq) {
+      seq.forEach((props, k) => {
+        // Only the first node may set up stones; later changes aren't supported.
+        if (!(first && k === 0) && (props.AB || props.AW || props.AE)) throw new Error('GoYomi can\'t load records that add or remove stones during the game.');
         const col = props.B ? BLACK : props.W ? WHITE : 0;
-        if (!col) continue;
+        if (!col) return;
         game.current = node;
         node.board.toPlay = col; // trust the record about whose turn it is
         const mv = toPt((props.B || props.W)[0]);
@@ -261,11 +274,11 @@ export class Game {
         if (!child) throw new Error(`Illegal move in SGF: ${ptName(mv)}`);
         if (props.C) child.comment = props.C[0];
         node = child;
-      }
+      });
       return node;
     };
-    const walk = (t, from, skipFirst) => {
-      const end = apply(skipFirst ? t.seq.slice(1) : t.seq, from);
+    const walk = (t, from, first) => {
+      const end = apply(t.seq, from, first);
       for (const v of t.vars) walk(v, end, false);
     };
     walk(tree, game.root, true);
