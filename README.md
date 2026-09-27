@@ -10,11 +10,12 @@ happened, and shows you what it would have played.
 
 ## What you get
 
-- **An opponent at your level.** Eight AI levels from Pebble to Dragon, plus
+- **An opponent at your level.** Nine AI levels from Pebble to Phoenix, plus
   handicap stones and komi. After a lopsided game it suggests a better match.
   Play Black, White, or both sides in study mode.
 - **A coach that watches every move.** Win bar, expected score, and a grade
-  for each move with a plain-language reason. Set **Coach explains for** to
+  for each move with a plain-language reason. It runs KataGo's neural
+  network right in your browser. Set **Coach explains for** to
   match your experience: beginners hear about liberties and captures,
   stronger players about points, threats and plans. **Show** puts the
   coach's move on the board; **Try it instead** plays it for you.
@@ -42,6 +43,10 @@ The top level, Dragon, played 40 games against GNU Go 3.8 at its strongest
 setting and won 38 of them. GNU Go plays at about 5 to 7 kyu on 9×9, so
 Dragon is a strong intermediate opponent. The lower levels step down from
 there to Pebble, which is for learning how captures work; each level won its
-10-game match against the one below it.
+10-game match against the one below it. Above Dragon, Phoenix plays with
+KataGo's neural network and won all 12 of its games against Dragon.
 
 © 2026 Frank Force. Free and open source under the [GPL-3.0 license](LICENSE).
+The coach and Phoenix use a [KataGo](https://github.com/lightvector/KataGo)
+network ([license](nets/LICENSE.txt)) run with TensorFlow.js, ported with
+help from [Web KaTrain](https://github.com/Sir-Teo/web-katrain) (MIT).

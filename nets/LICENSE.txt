@@ -1,5 +1,7 @@
 kata1-b6c96-s175395328-d26788732.txt.gz is a KataGo neural network from
-https://katagotraining.org/networks/ , used under the KataGo Neural Network License:
+https://katagotraining.org/networks/ , used under the KataGo Neural Network License.
+b6c96.bin is the same network with its weights stored as 16-bit floats
+(tools/convert-net.js), under the same license:
 
 --------------------
 
