@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, parsePt, ptName } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { boardFacts } from '../src/explain.js';
+import { boardFacts, moveFacts, regionOf } from '../src/explain.js';
+import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
 const played = (before, name) => { const a = before.clone(); a.play(P(name)); return a; };
@@ -51,4 +52,69 @@ test('boardFacts: self-atari, own eye, opening shape and passes', () => {
   const eye = Board.fromRows(['.........', '.........', '.........', '.........', '.........', '.........', '.........', 'X........', '.X.......'], BLACK);
   assert.ok(types(boardFacts(eye, played(eye, 'A1'), P('A1'))).includes('ownEye'));
   assert.deepEqual(boardFacts(empty, empty, PASS), [{ type: 'pass' }]);
+});
+
+// A hand-made coach read: ownership from { point: value } (black positive, 0
+// elsewhere); moves as [name, score, pv names, visits].
+const read = (toPlay, { own = {}, moves = [], score = 0 } = {}) => {
+  const ms = moves.map(([name, sc = 0, pv = [], visits = 100]) => ({ move: P(name), score: sc, winrate: 0.5, visits, pv: pv.map(P) }));
+  return { toPlay, score, winrate: 0.5, ownership: POINTS.map(p => own[ptName(p)] ?? 0), moves: ms, allMoves: ms };
+};
+const SPLIT = ['.........', '.........', '.........', '.........', '...O.O...', '.........', '.........', '.........', '.........'];
+
+test('a stone between two groups that gets captured is a sacrifice, not a cut', () => {
+  const before = Board.fromRows(SPLIT, BLACK), after = played(before, 'E5');
+  // White ataris at E4 and captures at E6: the E5 stone dies.
+  const reads = { after: read(WHITE, { own: { E5: -0.9 }, moves: [['E4', 0, ['J1', 'E6']]] }) };
+  const facts = moveFacts({ before, after, move: P('E5'), reads });
+  assert.ok(!types(facts).includes('cut'));
+  assert.ok(!types(facts).includes('separates'));
+  assert.equal(facts.find(f => f.type === 'stoneLost').stones, 1);
+});
+
+test('a stone between two groups that lives and keeps them apart is a cut', () => {
+  const before = Board.fromRows(SPLIT, BLACK), after = played(before, 'E5');
+  const reads = { after: read(WHITE, { own: { E5: 0.8 }, moves: [['E6', 0, ['E4']]] }) };
+  const facts = moveFacts({ before, after, move: P('E5'), reads });
+  assert.equal(facts.find(f => f.type === 'cut').groups, 2);
+  assert.ok(!types(facts).includes('stoneLost'));
+});
+
+test('no cut is claimed before the position after the move has been read', () => {
+  const before = Board.fromRows(SPLIT, BLACK);
+  assert.ok(!types(moveFacts({ before, after: played(before, 'E5'), move: P('E5') })).includes('cut'));
+});
+
+const WALL = ['.........', '.........', '..XXXX...', '..XOOX...', '..X..X...', '.........', '.........', '.........', '.........'];
+
+test('an atari on stones that were already dead is a dead target', () => {
+  const before = Board.fromRows(WALL, BLACK), after = played(before, 'D5');
+  const reads = { before: read(BLACK, { own: { D6: 0.8, E6: 0.8 } }), after: read(WHITE, { own: { D6: 0.9, E6: 0.9, D5: 0.9 } }) };
+  const facts = moveFacts({ before, after, move: P('D5'), reads });
+  assert.ok(types(facts).includes('atari'));
+  assert.deepEqual(facts.find(f => f.type === 'deadTarget').stones.map(ptName).sort(), ['D6', 'E6']);
+});
+
+test('the coach reads stones inside a wall as dead (real search)', () => {
+  seed(1);
+  const before = Board.fromRows(WALL, BLACK);
+  const s = new Search(before, { komi: 7 });
+  s.run(6000);
+  const facts = moveFacts({ before, after: played(before, 'D5'), move: P('D5'), reads: { before: s.results(10) } });
+  assert.ok(types(facts).includes('deadTarget'));
+});
+
+test('saving stones the coach expects to die anyway is a hopeless rescue', () => {
+  const before = Board.fromRows(['.........', '.........', '.........', '.........', '.O.......', 'OX.......', '.O.......', '.........', '.........'], BLACK);
+  const after = played(before, 'C4');
+  assert.equal(boardFacts(before, after, P('C4')).find(f => f.type === 'rescue').libs, 3);
+  const facts = moveFacts({ before, after, move: P('C4'), reads: { after: read(WHITE, { own: { B4: -0.8, C4: -0.8 } }) } });
+  assert.deepEqual(facts.find(f => f.type === 'hopelessRescue').stones.map(ptName), ['B4']);
+});
+
+test('stones the coach expected to live but now expects to die are lost', () => {
+  const before = Board.fromRows(['.........', '.........', '.........', '.........', '.........', '.........', '..X......', '.........', '.........'], BLACK);
+  const after = played(before, 'J9');
+  const reads = { before: read(BLACK, { own: { C3: 0.5 } }), after: read(WHITE, { own: { C3: -0.8, J9: 0.5 } }) };
+  assert.deepEqual(moveFacts({ before, after, move: P('J9'), reads }).find(f => f.type === 'losesStones').stones.map(ptName), ['C3']);
 });

@@ -77,3 +77,65 @@ export function boardFacts(before, after, move) {
   if (height === 0 && before.moveCount < 20 && !captured.length && !rescued.size && !ataris.length) out.push({ type: 'firstLine' });
   return out;
 }
+
+// The expected continuation after a read's position: its best move and that move's line.
+export function expectedLine(an) {
+  const m = an && an.moves && an.moves[0];
+  return m ? [m.move, ...(m.pv || [])] : [];
+}
+
+// Plays a line on a copy of the board, stopping at the first illegal move.
+function playOut(board, line, max = 8) {
+  const b = board.clone();
+  for (const m of line.slice(0, max)) {
+    if (m !== PASS && !b.isLegal(m)) break;
+    b.play(m);
+  }
+  return b;
+}
+
+const avg = xs => xs.reduce((s, v) => s + v, 0) / xs.length;
+
+// Facts that depend on how play is expected to go on. reads.after confirms or
+// rejects cuts and spots stones that will die; reads.before spots attacks on
+// stones that were already dead, and (with reads.after) stones the move loses.
+export function lookAheadFacts(before, after, move, facts, reads) {
+  const out = [], an = reads.after, pre = reads.before;
+  if (move === PASS) return out;
+  const c = before.toPlay, o = 3 - c;
+  if (an) {
+    const alive = ownOf(an, move, c);
+    const sep = facts.find(f => f.type === 'separates');
+    if (sep && alive > 0.3) {
+      const b = playOut(after, expectedLine(an));
+      const apart = sep.at.every(p => b.color[p] === o) && new Set(sep.at.map(p => b.head[p])).size === sep.at.length;
+      if (apart) out.push({ type: 'cut', groups: sep.at.length });
+    }
+    if (alive < -0.5) out.push({ type: 'stoneLost', stones: after.size[after.head[move]] });
+    const res = facts.find(f => f.type === 'rescue');
+    if (res && avg(res.stones.map(p => ownOf(an, p, c))) < -0.5) out.push({ type: 'hopelessRescue', stones: res.stones });
+  }
+  if (pre) {
+    const targets = [], seen = new Set();
+    for (const d of D4) {
+      const q = move + d;
+      if (before.color[q] !== o || seen.has(before.head[q])) continue;
+      seen.add(before.head[q]);
+      const stones = before.chainStones(q);
+      if (avg(stones.map(p => ownOf(pre, p, c))) > 0.6) targets.push(...stones);
+    }
+    if (targets.length) out.push({ type: 'deadTarget', stones: targets });
+  }
+  if (an && pre) {
+    const lost = POINTS.filter(p => before.color[p] === c && after.color[p] === c && ownOf(pre, p, c) > 0.3 && ownOf(an, p, c) < -0.5);
+    if (lost.length) out.push({ type: 'losesStones', stones: lost });
+  }
+  return out;
+}
+
+// Everything the coach can say about a move with the reads it has so far.
+export function moveFacts({ before, after, move, reads = {} }) {
+  const facts = boardFacts(before, after, move);
+  if (move === PASS) return facts;
+  return [...facts.filter(f => f.type !== 'separates'), ...lookAheadFacts(before, after, move, facts, reads)];
+}
