@@ -6,6 +6,10 @@
 //   ... --referee                        settle every disputed move (coach and oracle disagree in any
 //                                        config) with two fresh 300k reads of each candidate position
 // Options: --workers 7  --oracle-playouts 100000  --configs name,name  --verbose
+//   --engine katago    the oracle (and referee) read with KataGo's network instead, at
+//                      --oracle-visits (default 1600); its files end in -katago. The
+//                      configs named kata* grade with KataGo reads, the rest with the
+//                      built-in engine, so both can be scored against the same oracle.
 import { Worker, isMainThread, parentPort } from 'node:worker_threads';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { cpus } from 'node:os';
@@ -14,6 +18,10 @@ import { Search, seed, rand } from '../src/mcts.js';
 import { Game } from '../src/game.js';
 import { LEVELS, chooseMove, shouldPass, gradeMove, reviewNeeded, GRADING } from '../src/coach.js';
 import { mergeResults } from '../src/engine-client.js';
+import { buildPosition } from '../src/recipe.js';
+import { KataSearch } from '../src/katago/search.js';
+import { Evaluator } from '../src/katago/evaluator.js';
+import { loadNet } from './katago-node.js';
 
 const DIR = new URL('../local/', import.meta.url);
 const file = name => new URL(name, DIR);
@@ -44,6 +52,20 @@ function read(moves, playouts, trees, s) {
   return { toPlay: r.toPlay, playouts: r.playouts, winrate: r.winrate, score: r.score, moves: (r.allMoves || r.moves).map(slim) };
 }
 
+// The same with KataGo at `visits` (one tree; its random symmetries seeded from s).
+let net = null;
+async function readKata(moves, visits, s) {
+  net = net || (await loadNet()).net;
+  const game = gameAt(moves);
+  let r = s >>> 0 || 1;
+  const rand = () => { r ^= r << 13; r ^= r >>> 17; r ^= r << 5; return (r >>> 0) / 4294967296; };
+  const search = new KataSearch(buildPosition(game.recipe()), { komi: 7, evaluator: new Evaluator(net, { rand, cacheSize: 0 }), batch: 4 });
+  await search.run(visits);
+  const res = search.results(60);
+  const slim = m => ({ move: m.move, visits: m.visits, winrate: m.winrate, score: m.score });
+  return { toPlay: res.toPlay, playouts: res.playouts, engine: 'katago', winrate: res.winrate, score: res.score, moves: res.allMoves.map(slim) };
+}
+
 function playGame(la, lb, s) {
   seed(s);
   const game = new Game({ komi: 7 });
@@ -63,8 +85,10 @@ function playGame(la, lb, s) {
 }
 
 if (!isMainThread) {
-  parentPort.on('message', job => {
-    const out = job.type === 'game' ? playGame(job.la, job.lb, job.seed) : read(job.moves, job.playouts, job.trees, job.seed);
+  parentPort.on('message', async job => {
+    const out = job.type === 'game' ? playGame(job.la, job.lb, job.seed)
+      : job.visits ? await readKata(job.moves, job.visits, job.seed)
+      : read(job.moves, job.playouts, job.trees, job.seed);
     parentPort.postMessage({ id: job.id, out });
   });
 }
@@ -73,6 +97,13 @@ if (!isMainThread) {
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const flag = k => process.argv.includes('--' + k);
+const KATA = arg('engine') === 'katago';
+const ORACLE = KATA ? 'audit-oracle-katago.json' : 'audit-oracle.json';
+const REFEREE = KATA ? 'audit-referee-katago.json' : 'audit-referee.json';
+// The read job for a deep oracle or referee read (tag keeps seeds apart).
+const deepRead = (moves, tag, scale = 1) => KATA
+  ? { type: 'read', moves, visits: +arg('oracle-visits', 1600) * scale, seed: keySeed(tag + posKey(moves)) }
+  : { type: 'read', moves, playouts: +arg('oracle-playouts', 100000) * scale, trees: 1, seed: keySeed(tag + posKey(moves)) };
 
 function pool(n) {
   const workers = Array.from({ length: n }, () => new Worker(new URL(import.meta.url)));
@@ -126,14 +157,13 @@ function* allMoves(games) {
 }
 
 async function oracle(p, games) {
-  const playouts = +arg('oracle-playouts', 100000);
-  const cache = load('audit-oracle.json') || {};
+  const cache = load(ORACLE) || {};
   const get = moves => {
-    const k = posKey(moves);
-    if (cache[k] && cache[k].playouts >= playouts) return cache[k];
-    return p.run({ type: 'read', moves, playouts, trees: 1, seed: keySeed('oracle' + k) }).then(r => {
+    const k = posKey(moves), job = deepRead(moves, 'oracle');
+    if (cache[k] && cache[k].playouts >= (job.visits || job.playouts)) return cache[k];
+    return p.run(job).then(r => {
       cache[k] = r;
-      if (Object.keys(cache).length % 20 === 0) { store('audit-oracle.json', cache); process.stdout.write('.'); }
+      if (Object.keys(cache).length % 20 === 0) { store(ORACLE, cache); process.stdout.write('.'); }
       return r;
     });
   };
@@ -144,7 +174,7 @@ async function oracle(p, games) {
     const best = cache[posKey(m.parent)].moves[0].move;
     return best === m.move || best === PASS ? null : get([...m.parent, best]);
   }));
-  store('audit-oracle.json', cache);
+  store(ORACLE, cache);
   console.log(`\n${Object.keys(cache).length} oracle positions`);
 }
 
@@ -193,10 +223,22 @@ const CONFIGS = {
   single48k: { playouts: 48000, trees: 1 },
   // What the app does now ("Normal"): one 48k tree per position, averaged checks.
   app: { playouts: 48000, trees: 1, grade: checkedGrade, combine: 'avg' },
+  // KataGo's network at the app's Quick / Normal / Deep visits. Against a
+  // 1600-visit KataGo oracle (--engine katago, 211 moves in live games, 44 real
+  // mistakes), as false accusations / harsh / missed / mean error:
+  //   app          2/19 / 5/41 / 25 / 1.78    kataNormal       3/59 / 6/91 / 1 / 0.62
+  //   kataQuick    4/50 / 7/89 /  3 / 0.89    kataNormalPlain  3/55 / 7/93 / 1 / 0.65
+  //                                           kataNormalMin    1/51 / 6/90 / 1 / 0.62
+  // (The oracle is the same network, so its own blind spots don't show here.)
+  kataQuick: { visits: 133, grade: checkedGrade, combine: 'avg' },
+  kataNormal: { visits: 400, grade: checkedGrade, combine: 'avg' },
+  kataNormalPlain: { visits: 400 },
+  kataNormalMin: { visits: 400, grade: checkedGrade },
+  kataDeep: { visits: 1000, grade: checkedGrade, combine: 'avg' },
 };
 
 async function audit(p, games) {
-  const cache = load('audit-oracle.json');
+  const cache = load(ORACLE);
   if (!cache) { console.log('Run --oracle first.'); return; }
   const names = arg('configs', Object.keys(CONFIGS).join(',')).split(',');
   const reads = load('audit-coach.json') || {};
@@ -204,12 +246,14 @@ async function audit(p, games) {
   const results = [];
   for (const name of names) {
     const cfg = CONFIGS[name];
-    const tag = `${cfg.playouts}/${cfg.trees}`;
+    const tag = cfg.visits ? `katago:${cfg.visits}` : `${cfg.playouts}/${cfg.trees}`;
     const memo = reads[tag] = reads[tag] || {};
     const get = moves => {
       const k = posKey(moves);
       if (memo[k]) return memo[k];
-      return memo[k] = p.run({ type: 'read', moves, playouts: cfg.playouts, trees: cfg.trees, seed: keySeed(tag + k) }).then(r => memo[k] = r);
+      const job = cfg.visits ? { type: 'read', moves, visits: cfg.visits, seed: keySeed(tag + k) }
+        : { type: 'read', moves, playouts: cfg.playouts, trees: cfg.trees, seed: keySeed(tag + k) };
+      return memo[k] = p.run(job).then(r => memo[k] = r);
     };
     GRADING.combine = cfg.combine || 'min';
     const grade = cfg.grade || (async m => gradeMove(await get(m.parent), await get([...m.parent, m.move]), m.move));
@@ -235,7 +279,7 @@ async function referee(p, results) {
     const k = posKey([...r.m.parent, r.m.move]);
     if (!byMove.has(k)) byMove.set(k, { m: r.m, cands: new Set([r.m.move]) });
   }
-  const oracle = load('audit-oracle.json');
+  const oracle = load(ORACLE);
   for (const { rows } of results) for (const r of rows) {
     const d = byMove.get(posKey([...r.m.parent, r.m.move]));
     if (!d) continue;
@@ -243,12 +287,13 @@ async function referee(p, results) {
     d.cands.add(r.g.bestMove);
   }
   // Unfinished reads are saved as {} (a pending promise); drop them.
-  const cache = Object.fromEntries(Object.entries(load('audit-referee.json') || {}).filter(([, v]) => v.score !== undefined));
+  const cache = Object.fromEntries(Object.entries(load(REFEREE) || {}).filter(([, v]) => v.score !== undefined));
   const get = moves => {
     const k = posKey(moves);
     if (cache[k]) return cache[k];
-    return cache[k] = Promise.all(['ref1', 'ref2'].map(t => p.run({ type: 'read', moves, playouts: 300000, trees: 1, seed: keySeed(t + k) })))
-      .then(rs => { cache[k] = { score: (rs[0].score + rs[1].score) / 2, spread: Math.abs(rs[0].score - rs[1].score) }; store('audit-referee.json', cache); return cache[k]; });
+    // Twice as deep as the oracle (3x for the built-in engine), read twice.
+    return cache[k] = Promise.all(['ref1', 'ref2'].map(t => p.run(deepRead(moves, t, KATA ? 2 : 3))))
+      .then(rs => { cache[k] = { score: (rs[0].score + rs[1].score) / 2, spread: Math.abs(rs[0].score - rs[1].score) }; store(REFEREE, cache); return cache[k]; });
   };
   const loss = new Map();
   await Promise.all([...byMove].map(async ([k, d]) => {

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 // Stub Web Workers: tests drive their messages and errors by hand.
 const stubs = [];
-globalThis.Worker = class { constructor() { stubs.push(this); } postMessage(m) { if (m.type === 'search') this.sent = m; } };
-const { EnginePool } = await import('../src/engine-client.js');
+globalThis.Worker = class { constructor() { stubs.push(this); } postMessage(m) { if (m.type === 'search') this.sent = m; } terminate() { this.terminated = true; } };
+const { EnginePool, KataWorker, KataEngine } = await import('../src/engine-client.js');
 
 const result = playouts => ({ toPlay: 1, playouts, blackWinrate: 0.5, score: 1, ownership: new Array(81).fill(0),
   moves: [{ move: 40, visits: playouts, winrate: 0.5, score: 1, prior: 1, pv: [] }] });
@@ -69,4 +69,48 @@ test('engine worker: a new search with a step still queued runs one loop', async
   }
   assert.deepEqual(posted.map(m => m.type + m.id), ['done2']);
   assert.equal(posted[0].results.playouts, 500);
+});
+
+// KataGo's shared worker, once it has started.
+async function startedHost() {
+  stubs.length = 0;
+  const host = new KataWorker(), failures = [];
+  host.onFail = m => failures.push(m);
+  const ready = host.load();
+  stubs[0].onmessage({ data: { type: 'ready', backend: 'wasm', rate: 60, batch: 4 } });
+  assert.equal((await ready).ok, true);
+  return { host, failures, w: stubs[0] };
+}
+
+test('KataWorker: a crash after starting fails every engine, stays failed and says so', { timeout: 2000 }, async () => {
+  const { host, failures, w } = await startedHost();
+  const eng = new KataEngine('kopponent', host);
+  const p = eng.search({}, { visits: 128 });
+  w.onerror({ message: 'worker crashed' });
+  assert.equal(await p, null);
+  assert.equal(host.info.ok, false);
+  assert.equal(w.terminated, true);
+  assert.deepEqual(failures, ['worker crashed']);
+  assert.equal(await eng.search({}, { visits: 8 }), null, 'later searches end at once');
+});
+
+test('KataWorker: a fatal network error reported by the worker is handled the same way', { timeout: 2000 }, async () => {
+  const { host, failures, w } = await startedHost();
+  const p = new KataEngine('kcoach0', host).search({}, { visits: 50 });
+  w.onmessage({ data: { type: 'fatal', message: 'GPU device lost' } });
+  assert.equal(await p, null);
+  assert.deepEqual(failures, ['GPU device lost']);
+});
+
+test('KataWorker: a start that never finishes times out, and a late answer changes nothing', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  const host = new KataWorker({ startupMs: 50 }), failures = [];
+  host.onFail = m => failures.push(m);
+  const info = await host.load();
+  assert.equal(info.ok, false);
+  assert.match(info.message, /too long/);
+  assert.equal(stubs[0].terminated, true);
+  stubs[0].onmessage({ data: { type: 'ready', backend: 'wasm', rate: 60, batch: 4 } });
+  assert.equal(host.info.ok, false);
+  assert.deepEqual(failures, [], 'a failed start is reported by load(), not as a runtime failure');
 });

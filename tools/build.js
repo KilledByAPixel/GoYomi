@@ -1,9 +1,11 @@
 // Builds a self-contained copy of the game into dist/ for static hosts such as
 // itch.io:  node tools/build.js
 //
-// No dependencies. The ES modules in src/ are inlined into two classic scripts
-// (app.js for the page, engine-worker.js for the search worker), so the result
-// does not rely on module workers. dist/goyomi.zip is ready to upload.
+// No dependencies. The ES modules in src/ are inlined into classic scripts
+// (app.js for the page, engine-worker.js and katago-worker.js for the search
+// workers), so the result does not rely on module workers. The KataGo network
+// and the vendored TensorFlow.js are copied alongside. dist/goyomi.zip is
+// ready to upload.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -15,7 +17,7 @@ const dist = path.join(root, 'dist');
 
 // ------------------------------------------------------------------ module inliner
 
-const modId = file => '__' + path.basename(file, '.js').replace(/[^\w$]/g, '_');
+const modId = file => '__' + path.relative(src, file).replace(/\.js$/, '').replace(/[^\w$]/g, '_');
 
 // Splits a declaration list on top-level commas: "A = 0, B = [1, 2]" -> ["A = 0", "B = [1, 2]"].
 function splitTopLevel(s) {
@@ -39,7 +41,7 @@ function transform(file, code) {
       deps.push(m[2]);
       const names = m[1].split(',').map(s => s.trim()).filter(Boolean)
         .map(s => s.replace(/\s+as\s+/, ': '));
-      return `const { ${names.join(', ')} } = ${modId(m[2])};`;
+      return `const { ${names.join(', ')} } = ${modId(path.resolve(path.dirname(file), m[2]))};`;
     }
     if (/^import\b/.test(line)) throw new Error(`${file}: unsupported import form: ${line}`);
     if ((m = line.match(/^export\s*\{([^}]*)\};?\s*$/))) {
@@ -145,9 +147,20 @@ const files = new Map(); // dist name -> Buffer
 
 // The worker is created by URL; in the bundle it is a plain sibling script.
 files.set('app.js', Buffer.from(bundle(path.join(src, 'app.js'), {
-  'engine-client.js': { "new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' })": "new Worker('engine-worker.js')" },
+  'engine-client.js': {
+    "new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' })": "new Worker('engine-worker.js')",
+    "new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' })": "new Worker('katago-worker.js')",
+  },
 })));
 files.set('engine-worker.js', Buffer.from(bundle(path.join(src, 'engine-worker.js'))));
+files.set('katago-worker.js', Buffer.from(bundle(path.join(src, 'katago-worker.js'), {
+  'katago-worker.js': {
+    "new URL('../vendor/', import.meta.url)": "new URL('vendor/', self.location.href)",
+    "new URL('../nets/b6c96.bin', import.meta.url)": "new URL('nets/b6c96.bin', self.location.href)",
+  },
+})));
+for (const f of fs.readdirSync(path.join(root, 'vendor'))) files.set(`vendor/${f}`, fs.readFileSync(path.join(root, 'vendor', f)));
+for (const f of ['b6c96.bin', 'LICENSE.txt']) files.set(`nets/${f}`, fs.readFileSync(path.join(root, 'nets', f)));
 
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const tag = '<script type="module" src="src/app.js"></script>';
@@ -157,10 +170,13 @@ files.set('index.html', Buffer.from(html));
 files.set('style.css', fs.readFileSync(path.join(root, 'style.css')));
 files.set('LICENSE', fs.readFileSync(path.join(root, 'LICENSE')));
 
-for (const [name, data] of files) fs.writeFileSync(path.join(dist, name), data);
+for (const [name, data] of files) {
+  fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
+  fs.writeFileSync(path.join(dist, name), data);
+}
 fs.writeFileSync(path.join(dist, 'goyomi.zip'), zip([...files]));
 
 const kb = n => `${(n / 1024).toFixed(1)} KB`;
-for (const [name, data] of files) console.log(`  ${name.padEnd(18)} ${kb(data.length)}`);
-console.log(`  goyomi.zip         ${kb(fs.statSync(path.join(dist, 'goyomi.zip')).size)}`);
+for (const [name, data] of files) console.log(`  ${name.padEnd(36)} ${kb(data.length)}`);
+console.log(`  ${'goyomi.zip'.padEnd(36)} ${kb(fs.statSync(path.join(dist, 'goyomi.zip')).size)}`);
 console.log(`Built dist/ (${files.size} files + zip)`);
