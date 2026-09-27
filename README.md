@@ -38,9 +38,10 @@ itself.
 
 ## How strong is it?
 
-The top level, Dragon, played 20 games against GNU Go 3.8 at its strongest
-setting and won 17, lost 2 and drew 1. GNU Go plays at about 5 to 7 kyu on
-9×9, so Dragon is a strong intermediate opponent. The lower levels step down
-from there to Pebble, which is for learning how captures work.
+The top level, Dragon, played 40 games against GNU Go 3.8 at its strongest
+setting and won 38 of them. GNU Go plays at about 5 to 7 kyu on 9×9, so
+Dragon is a strong intermediate opponent. The lower levels step down from
+there to Pebble, which is for learning how captures work; each level won its
+10-game match against the one below it.
 
 © 2026 Frank Force. Free and open source under the [GPL-3.0 license](LICENSE).
