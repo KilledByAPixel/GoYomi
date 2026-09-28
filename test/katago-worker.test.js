@@ -87,3 +87,16 @@ test('Scheduler: a search with its own batch takes no more leaves a round than t
   // A level's move reads as it was calibrated: 12 visits in rounds of 4, not one round of 12.
   assert.deepEqual(sizes, [4, 4, 4]);
 });
+
+test('Scheduler: a coach read waiting behind the AI keeps its time for when it runs', async () => {
+  const posted = [];
+  const s = new Scheduler({ post: m => posted.push(m), yieldFn: () => Promise.resolve() });
+  // Each round takes about 20 ms, like a slow device.
+  s.evaluator = { maxBatch: 4, evaluate: async ps => { await new Promise(r => setTimeout(r, 20)); return ps.map(() => ({})); } };
+  const now = performance.now();
+  s.add({ ...job('kopponent', 60, 1), started: now });                 // about 15 rounds: 300 ms
+  s.add({ ...job('kcoach0', 8), maxTime: 100, started: now });           // 2 rounds, allowed 100 ms
+  await idle(s);
+  const coach = posted.find(m => m.engine === 'kcoach0');
+  assert.equal(coach.results.playouts, 8, 'the coach got its whole read after the AI finished');
+});

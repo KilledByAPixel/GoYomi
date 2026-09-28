@@ -13,7 +13,8 @@ export class Scheduler {
   }
 
   // job: { engine, id, search, target, maxTime, reportMs, priority, batch?, started, lastReport }
-  // batch caps the job's leaves per round (an AI level reads as it was calibrated).
+  // batch caps the job's leaves per round (an AI level reads as it was calibrated);
+  // paused, added here, is time spent held back by a higher-priority job.
   add(job) {
     this.jobs.delete(job.engine);
     if (this.broken) { this.post({ type: 'done', engine: job.engine, id: job.id, results: null }); return; }
@@ -28,9 +29,12 @@ export class Scheduler {
     this.pumping = true;
     try {
       while (this.jobs.size) {
+        const round = performance.now();
         let live = [...this.jobs.values()];
-        // The AI's move goes first: background reads wait while one is outstanding.
+        // The AI's move goes first: background reads wait while one is outstanding,
+        // and the time they wait doesn't count against their own time limit.
         const top = Math.max(...live.map(j => j.priority || 0));
+        const held = live.filter(j => (j.priority || 0) < top);
         live = live.filter(j => (j.priority || 0) === top);
         // No more leaves than one batch holds: with more searches than that, they take turns.
         const cap = this.evaluator.maxBatch;
@@ -44,11 +48,12 @@ export class Scheduler {
         const outs = all.length ? await this.evaluator.evaluate(all.map(s => s.pos)) : [];
         let at = 0;
         const now = performance.now();
+        for (const j of held) j.paused = (j.paused || 0) + (now - round);
         for (const { j, sels } of parts) {
           const mine = outs.slice(at, at += sels.length);
           if (this.jobs.get(j.engine) !== j) continue;   // stopped or replaced while the net ran
           j.search.apply(sels, mine);
-          const done = j.search.playouts >= j.target || now - j.started > j.maxTime;
+          const done = j.search.playouts >= j.target || now - j.started - (j.paused || 0) > j.maxTime;
           if (done || (j.reportMs && now - j.lastReport > j.reportMs)) {
             j.lastReport = now;
             const results = j.search.results(done ? 40 : 12);
