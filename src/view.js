@@ -272,8 +272,9 @@ export class BoardView {
     }
     this.layers.hover.innerHTML = hov;
 
-    // The ghost stone's column letter and row number stand out on the edges.
-    const hp = h ? h.p : null;
+    // The pointed-at point's column letter and row number stand out on the edges
+    // (any point: a stone, or while the AI thinks, not only where a ghost stone shows).
+    const hp = s.coord ?? (h ? h.p : null);
     if (hp !== this.coordPt) {
       this.coordPt = hp;
       for (const t of this.coordTexts) t.classList.toggle('on', hp !== null && (+t.dataset.col === ptX(hp) || +t.dataset.row === ptY(hp)));

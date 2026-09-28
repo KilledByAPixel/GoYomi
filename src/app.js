@@ -839,6 +839,7 @@ function renderBoard() {
   }
   if (s.pv) s.liberties = false; // numbered continuation stones would be confused with liberty counts
   else s.hover = hoverInfo();
+  s.coord = hoverPt; // the point under the pointer or keyboard cursor, stone or not
   if (locatePt !== null) s.locate = locatePt;
   view.render(s);
 }
