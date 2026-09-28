@@ -772,13 +772,15 @@ function hintsShown(node) {
     && !(aiColor() && !resigned && node.board.toPlay === aiColor() && node.children.length === 0);
 }
 
-// Why the top hint is worth playing, when it has a tactical point (cached per move).
+// Why the top hint is worth playing, when it has a tactical point (cached).
 function hintWhy(node) {
   if (!hintsShown(node)) return null;
   const top = node.analysis.moves.find(m => m.move !== PASS);
   if (!top) return null;
-  if (!node.hintWhy || node.hintWhy.move !== top.move) {
-    node.hintWhy = { move: top.move, text: hintReason(node.board, top.move, { level: coachLevel(), you: settings.human }) };
+  // The wording depends on the coach level and who "you" are, as well as the move.
+  const key = `${top.move}:${coachLevel()}:${settings.human}`;
+  if (!node.hintWhy || node.hintWhy.key !== key) {
+    node.hintWhy = { key, text: hintReason(node.board, top.move, { level: coachLevel(), you: settings.human }) };
   }
   return node.hintWhy.text;
 }

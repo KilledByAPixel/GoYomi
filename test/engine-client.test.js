@@ -177,3 +177,18 @@ test('KataWorker: a busy network that keeps answering, and an idle one, are left
   assert.equal(host.dead, false);
   host.fail('test over');
 });
+
+test('KataWorker: a search after a quiet spell starts the silence clock afresh', { timeout: 3000 }, async () => {
+  const { host, failures, w } = await stallHost(100);
+  const eng = new KataEngine('kopponent', host, { priority: 1 });
+  const first = eng.search({}, { visits: 12 });
+  w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
+  assert.ok(await first);
+  await wait(250); // idle, longer than the stall limit: the player is thinking
+  const second = eng.search({}, { visits: 12 });
+  await wait(60);  // the new search is under way, well within the limit
+  assert.deepEqual(failures, [], 'a healthy worker isn\'t treated as stalled');
+  w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
+  assert.ok(await second);
+  host.fail('test over');
+});

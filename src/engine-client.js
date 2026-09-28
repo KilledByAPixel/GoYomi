@@ -166,7 +166,7 @@ export class KataWorker {
         clearTimeout(this.timer);
         this.info = { ok: true, backend: msg.backend, rate: msg.rate, batch: msg.batch };
         this.watchdog = setInterval(() => {
-          if ([...this.engines.values()].some(e => e.busy) && performance.now() - this.heard > this.stallMs) this.fail('KataGo stopped responding');
+          if (this.busy && performance.now() - this.heard > this.stallMs) this.fail('KataGo stopped responding');
         }, this.stallMs / 4);
         if (this.watchdog.unref) this.watchdog.unref(); // node (tests): don't hold the process open
         this.resolveReady(this.info);
@@ -201,12 +201,10 @@ export class KataWorker {
     if (started && this.onFail) this.onFail(message);
   }
 
-  post(msg) {
-    if (this.dead) return;
-    // Work for an idle worker starts the silence clock afresh.
-    if (msg.type === 'search' && ![...this.engines.values()].some(e => e.busy)) this.heard = performance.now();
-    this.worker.postMessage(msg);
-  }
+  post(msg) { if (!this.dead) this.worker.postMessage(msg); }
+
+  // Whether any engine has a search waiting (the watchdog only minds silence then).
+  get busy() { return [...this.engines.values()].some(e => e.busy); }
 
   // Visits for a read worth `playouts` built-in playouts on this device.
   visits(playouts) {
@@ -234,6 +232,9 @@ export class KataEngine {
     this.cancel();
     if (this.host.dead) return Promise.resolve(null);
     const id = this.nextId++;
+    // Work for an idle worker starts the silence clock afresh (checked before
+    // this search counts as waiting, or the worker never looks idle).
+    if (!this.host.busy) this.host.heard = performance.now();
     return new Promise(resolve => {
       this.pending = { id, resolve, onProgress };
       this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), batch, maxTime, reportMs, priority: this.priority });

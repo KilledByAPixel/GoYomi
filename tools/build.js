@@ -205,14 +205,22 @@ swap('<script type="module" src="src/app.js"></script>', `<meta name="goyomi-ver
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
   }
+  // Decided once: a check that stalls (no answer, or a body that never ends)
+  // mustn't keep the game from starting, and a late answer changes nothing.
+  var decided = false;
+  function go() { if (!decided) { decided = true; startWhenParsed(); } }
+  var timer = setTimeout(go, 3000);
   fetch('version.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (latest) {
+    clearTimeout(timer);
+    if (decided) return;
     var tried = null;
     try { tried = sessionStorage.getItem('goyomi-reload'); } catch (e) { /* storage blocked */ }
     if (latest.version !== version && tried !== latest.version) {
+      decided = true;
       try { sessionStorage.setItem('goyomi-reload', latest.version); } catch (e) { /* storage blocked */ }
       location.reload();
-    } else startWhenParsed();
-  }).catch(startWhenParsed);
+    } else go();
+  }).catch(function () { clearTimeout(timer); go(); });
 })();
 </script>`);
 files.set('index.html', Buffer.from(html));
