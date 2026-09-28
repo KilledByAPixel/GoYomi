@@ -62,10 +62,12 @@ export class Scheduler {
       }
     } catch (err) {
       // The network failed (a lost GPU device, a backend error): every search is over.
+      // 'fatal' first: the page must know KataGo failed before any search
+      // ends, or it takes an AI move that ended empty as done and never retries it.
       this.broken = String(err && err.message || err);
+      this.post({ type: 'fatal', message: this.broken });
       for (const j of this.jobs.values()) this.post({ type: 'done', engine: j.engine, id: j.id, results: null });
       this.jobs.clear();
-      this.post({ type: 'fatal', message: this.broken });
     } finally {
       this.pumping = false;
     }

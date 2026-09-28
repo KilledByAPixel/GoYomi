@@ -123,3 +123,23 @@ test('KataEngine: a search can cap its batch (AI levels read as they were calibr
   eng.cancel();
   assert.equal(await p, null);
 });
+
+test('KataWorker: when the network fails, KataGo is marked failed before the AI\'s search ends', { timeout: 2000 }, async () => {
+  const { Scheduler } = await import('../src/katago/scheduler.js');
+  const { host, w } = await startedHost();
+  const eng = new KataEngine('kopponent', host, { priority: 1 });
+  let ended = false;
+  eng.search({}, { visits: 128 }).then(() => { ended = true; });
+  // The app retries the move from onFail only while that search is still open.
+  let endedAtFail = null;
+  host.onFail = () => { endedAtFail = ended; };
+  // What the worker's scheduler really posts when the network throws mid-search.
+  const posted = [];
+  const s = new Scheduler({ post: m => posted.push(m), yieldFn: () => Promise.resolve() });
+  s.evaluator = { maxBatch: 4, evaluate: async () => { throw new Error('GPU device lost'); } };
+  s.add({ engine: 'kopponent', id: w.sent.id, search: { playouts: 0, gather: n => Array.from({ length: n }, () => ({ pos: {} })) }, target: 128, maxTime: 1e9, reportMs: 0, priority: 1, started: 0, lastReport: 0 });
+  while (s.pumping) await new Promise(r => setTimeout(r, 0));
+  // Delivered as separate events, as postMessage does.
+  for (const m of posted) { w.onmessage({ data: m }); await new Promise(r => setTimeout(r, 0)); }
+  assert.equal(endedAtFail, false, `messages ${posted.map(m => m.type)}`);
+});

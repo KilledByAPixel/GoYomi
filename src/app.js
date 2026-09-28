@@ -54,6 +54,7 @@ let better = null;           // { node, move, pv } — coach move shown on node'
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
+let aiForce = false;         // ...and was asked for even though it isn't the AI's turn
 let coachJobs = [];          // per coach engine: the work item it is reading (see coachQueue)
 let restoreScoring = null;   // a counting screen to reopen after loading
 let locatePt = null;         // a point the player is hovering in the coach's text
@@ -122,7 +123,12 @@ function startKata() {
     flash(`KataGo stopped working (${message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
     useCoachEngine();
     // A move KataGo was thinking about is played by the built-in engine instead.
-    if (aiNode) { cancelAI(); setTimeout(() => aiMove(), 0); }
+    // Same request (the "AI move" button's too), if the position hasn't changed.
+    if (aiNode) {
+      const node = aiNode, force = aiForce, best = aiBest;
+      cancelAI();
+      setTimeout(() => { if (game.current === node) aiMove(force, best); }, 0);
+    }
   };
   kata.coach = new KataPool('kcoach', COACHES, kata.host);
   kata.scout = new KataEngine('kscout', kata.host);
@@ -334,7 +340,7 @@ async function aiMove(force = false, best = false) {
   const token = ++aiToken;
   const color = node.board.toPlay;
   const lv = best ? { playouts: settings.coachPlayouts, temp: 0, blunder: 0 } : level();
-  aiNode = node; aiBest = best;
+  aiNode = node; aiBest = best; aiForce = force;
   render();
   const t0 = performance.now();
   const opponent = await aiEngine(best);
