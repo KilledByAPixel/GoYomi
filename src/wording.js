@@ -42,13 +42,14 @@ export function levelGrade(g, level, facts = []) {
 // The sentence after the grade: how the move compares with the coach's choice.
 export function verdict(g, level, shown) {
   if (g.grade === 'best') return 'Exactly the coach\'s choice.';
-  const best = `<b>${ptName(g.bestMove)}</b>`;
+  const passed = g.bestMove === PASS;
+  const best = passed ? '<b>passing</b>' : `<b>${ptName(g.bestMove)}</b>`;
   if (!shown.flagged) {
     return g.ptLoss < 0.5 && g.wrLoss < 0.02
       ? `About as good as the coach's choice, ${best}.`
       : `A fine move. The coach slightly preferred ${best}.`;
   }
-  if (level === 'beginner') return `The coach would have played ${best}.`;
+  if (level === 'beginner') return passed ? 'The coach would have <b>passed</b>.' : `The coach would have played ${best}.`;
   if (g.ptLoss < 0.5) {
     return level === 'strong' ? `Keeps about the same score as ${best}, but the win chance drops ${Math.round(g.wrLoss * 100)}%.`
       : `About the same score as ${best}, but riskier.`;
@@ -256,7 +257,12 @@ export function atariWarnings(board, check, names) {
     const n = t.stones.length, where = ptName(t.stones[0]), lib = ptName(t.libs[0]);
     const stones = n > 1 ? `${n} stones at ${where} are` : `stone at ${where} is`;
     const r = check(t.libs[0]), ko = !r.ok && KO.has(r.reason);
-    if (t.color === me) {
+    if (t.color === me && subj(me) === 'the AI') {
+      // The AI's own stones on its turn: say what it can do, don't advise it.
+      if (ko) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari, and it can't run at ${lib} right now because of ko.` });
+      else if (ladderCapture(board, t.stones[0])) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari and can't escape: running at ${lib} leads to capture.` });
+      else out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari: the AI can run at ${lib}, or capture a neighbour.` });
+    } else if (t.color === me) {
       if (ko) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari, and ${subj(me)} can't run at ${lib} right now because of ko.` });
       else if (ladderCapture(board, t.stones[0])) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari and can't escape: running at ${lib} just leads to capture (a ladder or a dead end). Often it's better to play elsewhere.` });
       else out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari. Run at ${lib}, or capture a neighbour, to save ${n > 1 ? 'them' : 'it'}.` });

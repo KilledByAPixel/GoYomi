@@ -303,7 +303,12 @@ async function toggleThreat() {
   if (threat !== mine) return; // cleared with Esc, or superseded by a newer request
   if (res) preferUsefulMove(res);
   const m = res && res.moves.find(x => x.move !== PASS);
-  if (!m) { threat = res ? { node, none: true } : null; render(); return; }
+  if (!m) {
+    threat = res ? { node, none: true } : null;
+    render();
+    if (res) announce('The opponent has nothing urgent here.');
+    return;
+  }
   const passed = node.board.clone();
   passed.play(PASS);
   const after = passed.clone();
@@ -312,6 +317,8 @@ async function toggleThreat() {
   const cost = node.analysis ? (node.analysis.score - res.score) * sgn : null;
   threat = { node, opp, me, move: m.move, pv: pvStones(opp, [m.move, ...(m.pv || [])]), facts: boardFacts(passed, after, m.move), cost };
   render();
+  // Read out what the box says, without its how-to line.
+  announce(plainText([...$('#threatBox').children].filter(el => !el.classList.contains('muted')).map(el => el.innerHTML).join(' ')));
 }
 
 // ------------------------------------------------------------------ AI opponent
@@ -574,6 +581,7 @@ async function enterScoring(restored = false) {
   cancelAI();
   mode = 'score';
   const mine = scoring = { node, dead: new Set(), pending: true };
+  save(); // a reload while counting comes back to the count
   render();
   if (node.scoredDead) scoring.dead = new Set(node.scoredDead); // counted before: keep the player's dead/alive corrections
   else {
@@ -781,7 +789,8 @@ function renderPlayers() {
 
 function openingTip() {
   if (!settings.human) return 'Study mode: you place stones for both colours. Turn on <b>Best moves</b> to compare your ideas with the coach.';
-  if (game.handicap) return `Handicap game: Black starts with ${game.handicap} stones and White moves first. Use your head start: build territory and stay connected.`;
+  if (game.handicap && settings.human === BLACK) return `Handicap game: you start with ${game.handicap} stones and White moves first. Use your head start: build territory and stay connected.`;
+  if (game.handicap) return `Handicap game: the AI starts with ${game.handicap} stones and you move first. You're behind, so be bold: settle a group of your own, then look for weak points between its stones.`;
   if (settings.human === BLACK) return 'Welcome to the dojo! You are Black and move first. Click an intersection to place a stone. The centre (E5) or points like C3, G7, C7 or G3 are great starts. Take back any move with <kbd>U</kbd>.';
   return 'You are White. The AI moves first. White gets komi (bonus points) for going second.';
 }
@@ -1097,6 +1106,7 @@ function setupDialog() {
   $('#levelList').innerHTML = LEVELS.map((l, i) =>
     `<label class="level"><input type="radio" name="level" value="${i}"><span><b>${i + 1} · ${l.name}</b><small>${l.blurb}</small></span></label>`).join('');
   const dlg = $('#newGameDlg'), f = dlg.querySelector('form');
+  $('#dlgCancel').onclick = () => dlg.close('cancel');
   f.elements.handicap.onchange = () => { f.elements.komi.value = +f.elements.handicap.value ? '0.5' : '7'; };
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'ok') return;
@@ -1173,8 +1183,14 @@ function setupControls() {
   $('#btnUndo').onclick = takeBack;
   $('#btnHint').onclick = () => {
     hintOn = !hintOn;
-    if (hintOn && !game.current.analysis) flash('The coach is still reading this position…');
+    const an = game.current.analysis;
+    if (hintOn && !an) flash('The coach is still reading this position…');
     render();
+    // Screen readers and speech hear the hints too (mirror images named once).
+    if (hintOn && an) {
+      const names = [...new Map(hintList(an).map(h => [h.rank, ptName(h.move)])).values()];
+      announce(names.length ? `Best moves: ${names[0]} (best)${names.length > 1 ? ', then ' + names.slice(1).join(', ') : ''}.` : 'No hints here.');
+    }
   };
   $('#btnAI').onclick = () => aiMove(true, true);
   $('#btnThreat').onclick = toggleThreat;

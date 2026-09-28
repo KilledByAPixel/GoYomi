@@ -60,11 +60,11 @@
     </div>
 
     <div class="nav">
-      <button data-nav="first" title="Start (Home)">⏮</button>
-      <button data-nav="prev" title="Back (←)">◀</button>
+      <button data-nav="first" title="Start (Home)" aria-label="Start">⏮</button>
+      <button data-nav="prev" title="Back (←)" aria-label="Back">◀</button>
       <span id="moveLabel" class="move-label">Start</span>
-      <button data-nav="next" title="Forward (→)">▶</button>
-      <button data-nav="last" title="Latest (End)">⏭</button>
+      <button data-nav="next" title="Forward (→)" aria-label="Forward">▶</button>
+      <button data-nav="last" title="Latest (End)" aria-label="Latest">⏭</button>
     </div>
     <div id="variations" class="variations"></div>
   </main>
@@ -198,9 +198,9 @@
       </label>
       <label>Komi <input name="komi" type="number" step="0.5" min="-20" max="20"></label>
     </fieldset>
-    <p class="muted small">Handicap stones go to Black. Use them when the AI is winning too easily.</p>
+    <p class="muted small">Handicap stones go to Black. Play Black and take some when the AI is winning too easily.</p>
     <menu>
-      <button value="cancel" formnovalidate>Cancel</button>
+      <button type="button" id="dlgCancel">Cancel</button>
       <button value="ok" class="primary">Start</button>
     </menu>
   </form>

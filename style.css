@@ -27,7 +27,6 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
     color-scheme: dark;
   }
-  .g-white { opacity: .14; } /* keep the light win-rate line readable on the graph's lower band */
 }
 
 * { box-sizing: border-box; }
@@ -173,6 +172,9 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 /* Upper half is Black's side of 50%, lower half is White's; tinted to match. */
 .g-black { fill: #2d2a26; opacity: .12; }
 .g-white { fill: #fff; opacity: .6; }
+@media (prefers-color-scheme: dark) {
+  .g-white { opacity: .14; } /* keep the light win-rate line readable on the graph's lower band */
+}
 .g-mid { stroke: var(--muted); stroke-dasharray: 4 4; opacity: .5; }
 .g-cur { stroke: var(--accent); stroke-width: 2; }
 .g-wr { fill: none; stroke: var(--ink); stroke-width: 2; }

@@ -187,3 +187,19 @@ test('atariWarnings: a legal capture is still recommended', () => {
   const chance = atariWarnings(g.board, p => g.check(p), NAMES).find(w => w.kind === 'chance');
   assert.equal(chance.text, 'White\'s stone at A1 is in atari: you can capture at B1.');
 });
+
+test('verdict: when the coach would have passed, it says so in words', () => {
+  const g = { grade: 'mistake', bestMove: -1, ptLoss: 4, wrLoss: 0.1 };
+  assert.equal(verdict(g, 'beginner', levelGrade(g, 'beginner')), 'The coach would have <b>passed</b>.');
+  assert.equal(verdict(g, 'improving', levelGrade(g, 'improving')), 'About <b>4.0 points</b> worse than <b>passing</b>.');
+});
+
+test('atariWarnings: on the AI\'s turn, its own stones in atari are described, not advised', () => {
+  const g = new Game();
+  for (const m of 'A2 A1 B2 J9 J1'.split(' ')) g.play(P(m));
+  const AI = { whose: c => c === BLACK ? 'Your' : 'The AI\'s', who: c => c === BLACK ? 'You' : 'AI' };
+  const w = atariWarnings(g.board, p => g.check(p), AI).find(x => x.kind === 'warn');
+  assert.ok(w, 'a warning for the AI\'s stone');
+  assert.doesNotMatch(w.text, /\. Run at|better to play elsewhere/, w.text);
+  assert.match(w.text, /^The AI's stone at A1 is in atari/);
+});
