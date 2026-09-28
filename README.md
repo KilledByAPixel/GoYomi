@@ -10,8 +10,8 @@ happened, and shows you what it would have played.
 
 ## What you get
 
-- **An opponent at your level.** Nine AI levels from Pebble to Phoenix, plus
-  handicap stones and komi. After a lopsided game it suggests a better match.
+- **An opponent at your level.** Nine AI levels from Pebble to Phoenix, all
+  played by KataGo's neural network, plus handicap stones and komi. After a lopsided game it suggests a better match.
   Play Black, White, or both sides in study mode.
 - **A coach that watches every move.** Win bar, expected score, and a grade
   for each move with a plain-language reason. It runs KataGo's neural
@@ -39,14 +39,19 @@ itself.
 
 ## How strong is it?
 
-The top level, Dragon, played 40 games against GNU Go 3.8 at its strongest
-setting and won 38 of them. GNU Go plays at about 5 to 7 kyu on 9×9, so
-Dragon is a strong intermediate opponent. The lower levels step down from
-there to Pebble, which is for learning how captures work; each level won its
-10-game match against the one below it. Above Dragon, Phoenix plays with
-KataGo's neural network and won all 12 of its games against Dragon.
+Every level is KataGo's neural network, held back on purpose below Dragon:
+the lower levels play on instinct without reading ahead, and choose among
+their ideas more loosely, so their mistakes look like a learner's. In
+self-play each level beat the one below it in 7 to 9 games out of 10, from
+Pebble, which plays almost at random, up to Dragon.
+
+For an outside yardstick, GNU Go 3.8 at its strongest setting (about 5 to 7
+kyu on 9×9) sits around Reed: it beat Sprout 14 games to 6, lost to Reed 6
+to 11, and lost all 20 of its games against River and against Dragon.
+Phoenix, KataGo thinking longer, won 33 of its 37 decided games against
+Dragon. Where KataGo can't run, GoYomi's own engine plays instead.
 
 © 2026 Frank Force. Free and open source under the [GPL-3.0 license](LICENSE).
-The coach and Phoenix use a [KataGo](https://github.com/lightvector/KataGo)
+The AI and the coach use a [KataGo](https://github.com/lightvector/KataGo)
 network ([license](nets/LICENSE.txt)) run with TensorFlow.js, ported with
 help from [Web KaTrain](https://github.com/Sir-Teo/web-katrain) (MIT).
