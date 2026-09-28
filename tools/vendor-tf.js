@@ -1,6 +1,7 @@
 // Rebuilds vendor/: TensorFlow.js (the pinned dev dependencies in package.json)
 // bundled into one ES module the KataGo worker imports, plus the WASM backend's
-// binaries. Vendored so the game works offline and on itch.io.
+// binaries. Vendored rather than loaded from a CDN, so the game depends on no
+// other site and the itch.io upload is self-contained.
 //   npm install && node tools/vendor-tf.js
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';

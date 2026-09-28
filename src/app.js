@@ -183,7 +183,8 @@ function renderEngineInfo() {
   const el = $('#engineInfo');
   if (!el) return;
   const i = kata.info;
-  el.textContent = settings.coachEngine !== 'katago' ? 'The coach uses GoYomi\'s own Monte-Carlo engine.'
+  el.textContent = settings.coachEngine !== 'katago'
+    ? `The coach uses GoYomi's own Monte-Carlo engine. ${kata.state === 'ready' ? 'The AI plays with KataGo.' : kata.state === 'loading' ? 'Loading KataGo for the AI…' : 'The AI uses it too: KataGo isn\'t available here.'}`
     : kata.state === 'loading' ? 'Loading KataGo…'
     : kata.state === 'ready' ? `KataGo on ${i.backend.toUpperCase()}, ${Math.round(i.rate)} positions a second.`
     : kata.state === 'failed' ? (i && i.ok ? `KataGo is too slow here (${Math.round(i.rate)} positions a second); using the built-in engine.` : 'KataGo isn\'t available here; using the built-in engine.')

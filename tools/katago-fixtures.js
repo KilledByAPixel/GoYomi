@@ -59,7 +59,9 @@ for (const f of fixture.positions) {
   positions.push({ ...f, output });
 }
 await send('quit').catch(() => {});
-const about = fixture.about.replace(/Native KataGo v[\d.]+ kata-raw-nn outputs/, m => `${m}${fp16 ? '' : ', FP32 (openclUseFP16 = false)'}`);
+// The precision note is replaced, not appended again, when the fixture is regenerated.
+const about = fixture.about.replace(/, FP32 \(openclUseFP16 = false\)/g, '')
+  .replace(/Native KataGo v[\d.]+ kata-raw-nn outputs/, m => `${m}${fp16 ? '' : ', FP32 (openclUseFP16 = false)'}`);
 writeFileSync(out, JSON.stringify({ ...fixture, about, positions }, null, 1) + '\n');
 console.log(`rules ${rules}`);
 console.log(`wrote ${positions.length} positions to ${out}`);

@@ -221,7 +221,7 @@ const CONFIGS = {
   single24kMin: { playouts: 24000, trees: 1, grade: checkedGrade },
   single24kAvg: { playouts: 24000, trees: 1, grade: checkedGrade, combine: 'avg' },
   single48k: { playouts: 48000, trees: 1 },
-  // What the app does now ("Normal"): one 48k tree per position, averaged checks.
+  // What the app did with the built-in engine ("Normal"): one 48k tree per position, averaged checks.
   app: { playouts: 48000, trees: 1, grade: checkedGrade, combine: 'avg' },
   // KataGo's network at the app's Quick / Normal / Deep visits. Against a
   // 1600-visit KataGo oracle (--engine katago, 211 moves in live games, 44 real
@@ -268,7 +268,7 @@ async function audit(p, games) {
   for (const { name, rows } of results) report(name, rows);
 }
 
-// The oracle is one 150k read per position, which can still be several points
+// The oracle is one read per position (--oracle-playouts, 100k by default), which can still be several points
 // off. For each disputed move, read every candidate (played, oracle's best, each
 // config's best) twice more at 300k, and replace the oracle loss with that.
 async function referee(p, results) {
