@@ -20,7 +20,8 @@ const side = (k, d) => {
 };
 const A = side('a', 0), B = side('b', 1), games = +arg('games', 8), first = +arg('first', 0);
 seed(+arg('seed', 1) + first);
-const evaluator = A.engine === 'katago' || B.engine === 'katago' ? new Evaluator((await loadNet()).net) : null;
+// The evaluator's random symmetries use the seeded stream too, so --seed replays the same games.
+const evaluator = A.engine === 'katago' || B.engine === 'katago' ? new Evaluator((await loadNet()).net, { rand }) : null;
 // Only a level that reads enough to know resigns a lost game.
 const canResign = S => S.engine === 'katago' ? S.lv.kata.visits >= 16 : S.lv.playouts >= 1500;
 

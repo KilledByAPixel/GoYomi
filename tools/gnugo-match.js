@@ -27,7 +27,7 @@ import { spawn, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
 import { BLACK, WHITE, PASS, ptName, parsePt } from '../src/board.js';
-import { Search, seed } from '../src/mcts.js';
+import { Search, seed, rand } from '../src/mcts.js';
 import { Game } from '../src/game.js';
 import { LEVELS, estimateDead } from '../src/coach.js';
 import { Evaluator } from '../src/katago/evaluator.js';
@@ -104,13 +104,18 @@ const gtpColor = c => (c === BLACK ? 'black' : 'white');
 
 // One network per process, loaded on first use.
 let evaluatorOnce = null;
-const sharedEvaluator = async () => evaluatorOnce || (evaluatorOnce = new Evaluator((await loadNet()).net));
+// Its random symmetries use the seeded stream, like the rest of the game.
+const sharedEvaluator = async () => evaluatorOnce || (evaluatorOnce = new Evaluator((await loadNet()).net, { rand }));
+
+// The opponent engine of the game in progress: stopped when the worker exits,
+// even after an error (it would otherwise keep the worker, and the match, alive).
+let opponent = null;
 
 async function playGame(index) {
   const ours = index % 2 === 0 ? BLACK : WHITE; // alternate colours
   const lv = LEVELS[opts.level];
   seed((index + 1) * 7919);
-  const gnu = opts.katago
+  const gnu = opponent = opts.katago
     ? new Gtp(opts.katago, katagoArgs())
     : new Gtp(opts.gnugo, ['--mode', 'gtp', '--boardsize', '9', '--chinese-rules',
       '--komi', String(opts.komi), '--level', String(opts.gnulevel), '--seed', String(index + 1)]);
@@ -167,7 +172,8 @@ async function playGame(index) {
 
 if (process.argv.includes('--worker')) {
   const index = +arg('index', 0);
-  playGame(index).then(r => process.send(r), e => process.send({ game: index + 1, error: e.message }));
+  const done = msg => { if (opponent) opponent.proc.kill(); process.send(msg, () => process.exit(0)); };
+  playGame(index).then(done, e => done({ game: index + 1, error: e.message }));
 } else {
   const self = fileURLToPath(import.meta.url);
   const lvName = LEVELS[opts.level].name;

@@ -10,9 +10,16 @@ import { Evaluator } from '../src/katago/evaluator.js';
 
 export const NET_FILE = fileURLToPath(new URL('../nets/b6c96.bin', import.meta.url));
 
-let loaded = null;
+// TF.js has one backend per process, so the network loads once; asking again
+// with different options is an error rather than silently getting the first.
+let loaded = null, loadedWith = '';
 export async function loadNet({ backend = 'wasm', file = NET_FILE, threads = 1 } = {}) {
-  if (loaded) return loaded;
+  const key = JSON.stringify([backend, file, threads]);
+  if (loaded) {
+    if (key !== loadedWith) throw new Error(`loadNet: already loaded with ${loadedWith}; one network setup per process`);
+    return loaded;
+  }
+  loadedWith = key;
   let used = 'cpu';
   if (backend === 'wasm') {
     try {
