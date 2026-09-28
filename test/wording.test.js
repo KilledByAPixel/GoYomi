@@ -53,19 +53,19 @@ const ctx = (level, extra = {}) => ({ level, mover: BLACK, you: BLACK, shown: { 
 
 test('describe: the G3 example at each level', () => {
   assert.deepEqual(describe(G3_FACTS, ctx('beginner')), [
-    'Puts White\'s stone at G4 in atari: it has only 1 liberty left.',
-    'White has to save it.',
-    'After White answers, this guards the bottom of the board.',
+    'Puts the AI\'s stone at G4 in atari: it has only 1 liberty left.',
+    'The AI has to save it.',
+    'After the AI answers, this guards the bottom of the board.',
   ]);
   assert.deepEqual(describe(G3_FACTS, ctx('improving')), [
-    'Threatens to capture White\'s stone at G4.',
-    'Once White answers at G5, it secures your lower side (worth about 8 points), and you get to play elsewhere next (sente).',
-    'Otherwise White would play G3.',
+    'Threatens to capture the AI\'s stone at G4.',
+    'Once the AI answers at G5, it secures your lower side (worth about 8 points), and you get to play elsewhere next (sente).',
+    'Otherwise the AI would play G3.',
   ]);
   assert.deepEqual(describe(G3_FACTS, ctx('strong')), [
-    'Sente: threatens to capture White\'s stone at G4.',
+    'Sente: threatens to capture the AI\'s stone at G4.',
     'After G5 it secures your lower side (+8).',
-    'Otherwise White plays G3.',
+    'Otherwise the AI plays G3.',
   ]);
 });
 
@@ -122,7 +122,7 @@ test('describe: empty triangles and first-line moves are only criticised when th
   assert.deepEqual(describe(filled, ctx('improving', { shown: undefined })), [], 'not until the grade is known');
   const joint = [{ type: 'alreadyConnected', via: 'bamboo' }, { type: 'emptyTriangle' }];
   assert.deepEqual(describe(joint, flagged('improving')), ['Your stones were already connected by a bamboo joint, so connecting here makes an empty triangle.']);
-  assert.match(describe(joint, flagged('beginner'))[0], /two gaps between them, and if White plays in one, you can fill the other/);
+  assert.match(describe(joint, flagged('beginner'))[0], /two gaps between them, and if the AI plays in one, you can fill the other/);
   assert.deepEqual(describe(joint, ctx('improving')), ['Makes the bamboo joint solid.']);
   const bent = [{ type: 'emptyTriangle' }, { type: 'shape', shape: 'extend' }];
   assert.deepEqual(describe(bent, flagged('improving')), ['Makes an empty triangle, an inefficient shape.']);
@@ -240,4 +240,12 @@ test('hideAnswer: drops lines that name the answer (or a mirror image of it), ke
   const lines = ['Leaves <b>2 stones</b> in atari.', 'Otherwise White would play <b>D7</b>.', 'After F3 it reduces the lower side.', 'Claims the D-file? No: D70 is not a point.'];
   assert.deepEqual(hideAnswer(lines, [P('D7')]), ['Leaves <b>2 stones</b> in atari.', 'After F3 it reduces the lower side.', 'Claims the D-file? No: D70 is not a point.']);
   assert.deepEqual(hideAnswer(lines, [P('C3'), P('F3')]), ['Leaves <b>2 stones</b> in atari.', 'Otherwise White would play <b>D7</b>.', 'Claims the D-file? No: D70 is not a point.']);
+});
+
+test('the coach calls the opponent "the AI" in games against it, and uses colours in study mode', () => {
+  const atari = [{ type: 'atari', stones: [P('A1')] }];
+  const vsAI = describe(atari, { level: 'beginner', mover: BLACK, you: BLACK }).join(' ');
+  assert.match(vsAI, /the AI's stone at A1/);
+  assert.doesNotMatch(vsAI, /White/);
+  assert.match(describe(atari, { level: 'beginner', mover: BLACK, you: 0 }).join(' '), /White's stone at A1/, 'study mode keeps colours');
 });

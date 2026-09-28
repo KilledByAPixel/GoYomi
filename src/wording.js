@@ -63,11 +63,12 @@ const colorName = c => c === BLACK ? 'Black' : 'White';
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const count = n => n === 1 ? '1 stone' : `${n} stones`;
 
-// Words for the players. ctx.you is the human's colour (0 in study mode, when
-// both sides are named by colour).
+// Words for the players. ctx.you is the human's colour: the other side is "the
+// AI" (0 in study mode, when both sides are named by colour).
+const other = (c, ctx) => ctx.you ? 'the AI' : colorName(c);
 function words(ctx) {
-  const subj = c => c === ctx.you ? 'you' : colorName(c);
-  const poss = c => c === ctx.you ? 'your' : `${colorName(c)}'s`;
+  const subj = c => c === ctx.you ? 'you' : other(c, ctx);
+  const poss = c => c === ctx.you ? 'your' : `${other(c, ctx)}'s`;
   const verb = (c, plain, third) => c === ctx.you ? plain : third;
   // "White's stone at G4", "your 3 stones at C3".
   const stones = (c, list) => `${poss(c)} ${list.length === 1 ? 'stone' : `${list.length} stones`} at ${ptName(list[0])}`;
@@ -253,7 +254,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'initiative':
-        if (!f.sente && !B) out.push(S ? `Gote: ${colorName(opp)} can play elsewhere.` : `${cap(w.subj(opp))} can play elsewhere without answering (gote).`);
+        if (!f.sente && !B) out.push(S ? `Gote: ${other(opp, ctx)} can play elsewhere.` : `${cap(w.subj(opp))} can play elsewhere without answering (gote).`);
         else if (f.sente && !purpose && level === 'improving') {
           out.push(`${cap(w.subj(opp))} ${w.verb(opp, 'have', 'has')} to answer, so ${w.subj(mover)} ${w.verb(mover, 'keep', 'keeps')} the initiative (sente).`);
         }
@@ -271,7 +272,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'otherwise':
-        if (!B) out.push(S ? `Otherwise ${colorName(opp)} plays ${ptName(f.move)}.` : `Otherwise ${w.subj(opp)} would play ${ptName(f.move)}.`);
+        if (!B) out.push(S ? `Otherwise ${other(opp, ctx)} plays ${ptName(f.move)}.` : `Otherwise ${w.subj(opp)} would play ${ptName(f.move)}.`);
         break;
     }
   }
