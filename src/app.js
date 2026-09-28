@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, chooseMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
@@ -105,7 +105,6 @@ function flash(text, kind = '') {
 
 // ------------------------------------------------------------------ engines
 
-const wantsKata = () => settings.coachEngine === 'katago' || level().katago;
 const coachKind = () => coach === kata.coach ? 'katago' : 'builtin';
 const kindOf = results => results && results.engine === 'katago' ? 'katago' : 'builtin';
 // The coach waits for KataGo while it loads; resolves once it's settled either way.
@@ -120,7 +119,7 @@ function startKata() {
   kata.host.onFail = message => {
     kata.state = 'failed';
     kata.info = kata.host.info;
-    flash(`KataGo stopped working (${message}), so the coach uses the built-in engine.`);
+    flash(`KataGo stopped working (${message}), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`);
     useCoachEngine();
     // A move KataGo was thinking about is played by the built-in engine instead.
     if (aiNode) { cancelAI(); setTimeout(() => aiMove(), 0); }
@@ -132,8 +131,8 @@ function startKata() {
     // Too slow to read positions in a few seconds: the built-in engine coaches better.
     kata.state = info.ok && info.rate >= MIN_RATE ? 'ready' : 'failed';
     if (kata.state === 'failed') {
-      flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the coach uses the built-in engine.`
-        : `KataGo couldn't start here (${info.message}), so the coach uses the built-in engine.`);
+      flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`
+        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`);
     }
     useCoachEngine();
   });
@@ -143,7 +142,7 @@ function startKata() {
 // Points the coach at the engine the settings ask for. Reads from the other
 // engine are dropped: grades compare two reads, which must come from one engine.
 function useCoachEngine() {
-  if (wantsKata()) startKata();
+  startKata(); // every AI level plays with KataGo, so it always loads
   const want = settings.coachEngine === 'katago' && kata.state === 'ready' ? kata : builtin;
   if (want.coach !== coach) {
     stopCoach();
@@ -316,10 +315,10 @@ function cancelAI() {
   if (aiNode) { builtin.opponent.cancel(); if (kata.opponent) kata.opponent.cancel(); aiNode = null; }
 }
 
-// The engine for an AI move: KataGo for its level, or for the coach's own move
-// when the coach reads with it; the built-in engine otherwise.
-async function aiEngine(lv, best) {
-  if (!(lv.katago || best && settings.coachEngine === 'katago')) return builtin.opponent;
+// The engine for an AI move: KataGo whenever it runs here (every level uses
+// it; the "AI move" button follows the coach's engine), else the built-in one.
+async function aiEngine(best) {
+  if (best && settings.coachEngine !== 'katago') return builtin.opponent;
   startKata();
   if (kata.state === 'loading') await kata.host.ready;
   return kata.state === 'ready' ? kata.opponent : builtin.opponent;
@@ -338,15 +337,14 @@ async function aiMove(force = false, best = false) {
   aiNode = node; aiBest = best;
   render();
   const t0 = performance.now();
-  const opponent = await aiEngine(lv, best);
+  const opponent = await aiEngine(best);
   if (token !== aiToken) return;
-  // KataGo's level without KataGo: the strongest built-in level stands in.
-  const fallback = lv.katago && opponent === builtin.opponent;
-  if (fallback && !kata.warned) { kata.warned = true; flash(`${lv.name} needs KataGo, which can't run here; ${LEVELS[lv.fallback].name} plays instead.`); }
   const kind = opponent === builtin.opponent ? 'builtin' : 'katago';
-  const budget = lv.katago && !fallback ? { visits: lv.visits } : { playouts: fallback ? LEVELS[lv.fallback].playouts : lv.playouts };
+  // Without KataGo each level plays as its built-in namesake (Phoenix as Dragon).
+  const onKata = !best && kind === 'katago';
+  const budget = onKata ? { visits: lv.kata.visits } : { playouts: lv.playouts };
   let results = best && node.analysisDone && kindOf(node.analysis) === kind ? node.analysis
-    : await opponent.search(game.recipe(node), { ...budget, maxTime: 15000, reportMs: 0 });
+    : await opponent.search(game.recipe(node), { ...budget, maxTime: onKata && lv.maxTime ? lv.maxTime : 15000, reportMs: 0 });
   if (token !== aiToken) return;
   // A read started before the coach depth changed still picks the move, but isn't the analysis.
   if (best && results && !node.analysisDone && lv.playouts === settings.coachPlayouts && kind === coachKind()) { node.analysis = preferUsefulMove(results); node.analysisDone = true; tryGrade(node); }
@@ -363,7 +361,7 @@ async function aiMove(force = false, best = false) {
   aiNode = null;
   if (!results || !passInfo || game.current !== node) { render(); return; }
   if (!node.analysis && effort(results) >= 1500 && kindOf(results) === coachKind()) node.analysis = results;
-  let move = shouldPass(game, passInfo, color) ? PASS : chooseMove(results, lv);
+  let move = shouldPass(game, passInfo, color) ? PASS : onKata ? chooseKataMove(results, lv.kata) : chooseMove(results, lv);
   if (move !== PASS && !game.check(move).ok) {
     move = (results.allMoves || results.moves).map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
   }
@@ -1127,7 +1125,7 @@ function setupControls() {
     save(); render();
   });
   $('#optLevel').innerHTML = LEVELS.map((l, i) => `<option value="${i}">${i + 1} · ${l.name}</option>`).join('');
-  $('#optLevel').onchange = e => { settings.level = +e.target.value; if (level().katago) startKata(); save(); render(); };
+  $('#optLevel').onchange = e => { settings.level = +e.target.value; save(); render(); };
   $('#optCoach').onchange = e => {
     // Cancelling the coach now would also cancel the dead-stone search.
     if (scoring && scoring.pending) { e.target.value = String(settings.coachPlayouts); return; }
