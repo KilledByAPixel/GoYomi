@@ -36,6 +36,7 @@ const DEFAULTS = {
   coachPlayouts: 48000,
   coachEngine: 'katago',     // 'katago' or 'builtin'
   gradeAI: false,
+  findYourself: false,
   coachFor: 'auto',
   speak: false,
   sound: true,
@@ -557,7 +558,9 @@ function announceGrade(node) {
   node.announced = true;
   const level = coachLevel(), facts = factsFor(node), shown = levelGrade(node.grade, level, facts);
   const lines = describe(facts, { level, mover: node.color, you: settings.human, shown });
-  announce(plainText(`Coach: ${shown.label}. ${verdict(node.grade, level, shown)} ${lines.join(' ')}`));
+  const said = puzzle(node, shown) ? 'There was something better here. Can you find it?'
+    : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}`;
+  announce(plainText(`Coach: ${shown.label}. ${said} ${lines.join(' ')}`));
 }
 
 // What the coach knows about node's move so far (explain.js), from whatever
@@ -849,6 +852,8 @@ function renderCoach() {
     if (!target) return;
     if (act === 'show') showBetter(target);
     if (act === 'try') tryInstead(target);
+    if (act === 'retry') retry(target);
+    if (act === 'reveal') reveal(target);
   };
   const why = hintWhy(node);
   $('#hintWhy').hidden = !why;
@@ -919,6 +924,25 @@ function ignoreLine(node) {
   return ignoreNote(node.board, node.move, node.analysis, coachLevel());
 }
 
+// Find it yourself: the player's Mistake or Blunder against the AI, with the
+// coach's move hidden until they ask (Show answer) or find a good move.
+const puzzle = (node, shown) => settings.findYourself && !!settings.human && node.color === settings.human
+  && !node.revealed && (shown.key === 'mistake' || shown.key === 'blunder');
+// A Good or Best move played from a position the player went back to with Try again.
+const found = (node, shown) => !!(node.parent && node.parent.retry) && (shown.key === 'best' || shown.key === 'good');
+
+function retry(node) {
+  node.parent.retry = true;
+  goTo(node.parent);
+}
+
+function reveal(node) {
+  node.revealed = true;
+  render();
+  const level = coachLevel(), shown = levelGrade(node.grade, level, factsFor(node));
+  announce(plainText(`Coach: ${verdict(node.grade, level, shown)}`));
+}
+
 function moveEntry(node) {
   const latest = node === game.current;
   const head = pill => `<div class="fb-head">${pill}<span><b>${who(node.color)}</b> ${node.move === PASS ? 'passed' : `played <b>${ptName(node.move)}</b>`}</span></div>`;
@@ -936,9 +960,11 @@ function moveEntry(node) {
   let html;
   if (!settings.show.feedback) html = head('');
   else if (!g) html = head(`<span class="pill pending">${node.checkMove != null ? 'double-checking…' : 'grading…'}</span>`);
-  else {
-    ctx.shown = levelGrade(g, level, facts);
-    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${verdict(g, level, ctx.shown)}</p>`;
+  else if (puzzle(node, ctx.shown = levelGrade(g, level, facts))) {
+    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + '<p>There was something better here. Can you find it?</p>' +
+      `<div class="fb-actions"><button data-act="retry" data-id="${node.id}">Try again</button><button data-act="reveal" data-id="${node.id}">Show answer</button></div>`;
+  } else {
+    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
       html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}" data-pt="${g.bestMove}">Show ${ptName(g.bestMove)}</button>` +
         `<button data-act="try" data-id="${node.id}" data-pt="${g.bestMove}">Try ${ptName(g.bestMove)} instead</button></div>`;
@@ -1077,6 +1103,7 @@ function load() {
     if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     if (!['katago', 'builtin'].includes(settings.coachEngine)) settings.coachEngine = DEFAULTS.coachEngine;
     settings.gradeAI = !!settings.gradeAI;
+    settings.findYourself = !!settings.findYourself;
     settings.speak = !!settings.speak;
     if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
@@ -1169,6 +1196,7 @@ function syncOptions() {
   $('#optEngine').value = settings.coachEngine;
   $('#optCoachFor').value = settings.coachFor;
   $('#optGradeAI').checked = settings.gradeAI;
+  $('#optFindYourself').checked = settings.findYourself;
   $('#optSpeak').checked = settings.speak;
   $('#optSound').checked = settings.sound;
   $('#toggles').querySelectorAll('input').forEach(i => { i.checked = !!settings.show[i.dataset.key]; });
@@ -1209,6 +1237,7 @@ function setupControls() {
     for (const n of game.line()) tryGrade(n);
     save(); render(); scheduleCoach();
   };
+  $('#optFindYourself').onchange = e => { settings.findYourself = e.target.checked; save(); render(); };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
   $('#optSpeak').onchange = e => { settings.speak = e.target.checked; setSpeech(settings.speak); save(); announce(settings.speak ? 'Speech on.' : 'Speech off.'); };
   if (!speechAvailable()) { $('#optSpeak').disabled = true; $('#speakNote').hidden = false; }
