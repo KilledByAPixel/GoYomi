@@ -49,7 +49,8 @@ For an outside yardstick, GNU Go 3.8 at its strongest setting (about 5 to 7
 kyu on 9×9) sits around Reed: it beat Sprout 14 games to 6, lost to Reed 6
 to 11, and lost all 20 of its games against River and against Dragon.
 Phoenix, KataGo thinking longer, won 33 of its 37 decided games against
-Dragon. Where KataGo can't run, GoYomi's own engine plays instead.
+Dragon; it thinks for at most 10 seconds a move, so on slow devices it reads
+less. Where KataGo can't run, GoYomi's own engine plays instead.
 
 © 2026 Frank Force. Free and open source under the [GPL-3.0 license](LICENSE).
 The AI and the coach use a [KataGo](https://github.com/lightvector/KataGo)

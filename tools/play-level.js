@@ -1,6 +1,8 @@
 // One AI move as the app plays it, for the match tools: KataGo levels by their
 // recipe, built-in levels by playouts. After the opponent passes, the decision
 // to pass too uses a deeper read (33 visits, or 4000 playouts), as the app does.
+// Reads always run to their full budget: the app's time limits (Phoenix's 10 s)
+// aren't applied, so results here are for a device fast enough to reach them.
 import { PASS } from '../src/board.js';
 import { Search, rand as mctsRand } from '../src/mcts.js';
 import { chooseMove, chooseKataMove, shouldPass, LEVEL_BATCH } from '../src/coach.js';
