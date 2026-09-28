@@ -131,3 +131,15 @@ test('the evaluation cache tells apart histories that differ only in who moved',
   const E5 = parsePt('E5');
   assert.notEqual(key([[PASS, BLACK], [E5, WHITE]]), key([[PASS, WHITE], [E5, WHITE]]));
 });
+
+test('results include the network\'s instinct for every legal move', async () => {
+  const { net } = await loadNet();
+  const s = new KataSearch(buildPosition({ setup: [], moves: [], whiteFirst: false }), { komi: 7, evaluator: new Evaluator(net), batch: 1 });
+  await s.run(1);
+  const r = s.results();
+  const onBoard = r.policy.filter(m => m.move !== PASS);
+  // Mirror images are folded on the empty board: each entry plus its twins covers the board once.
+  assert.equal(onBoard.reduce((n, m) => n + 1 + (m.twins ? m.twins.length : 0), 0), 81);
+  assert.ok(Math.abs(r.policy.reduce((t, m) => t + m.prior, 0) - 1) < 1e-4, 'priors sum to 1');
+  assert.ok(r.policy.length > r.allMoves.length, 'more than the moves the search visited');
+});

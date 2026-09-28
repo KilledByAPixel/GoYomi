@@ -52,7 +52,7 @@ export class Scheduler {
             j.lastReport = now;
             const results = j.search.results(done ? 40 : 12);
             results.engine = 'katago';
-            if (!done) delete results.allMoves;
+            if (!done) { delete results.allMoves; delete results.policy; }
             this.post({ type: done ? 'done' : 'progress', engine: j.engine, id: j.id, results, elapsed: now - j.started });
           }
           if (done) this.jobs.delete(j.engine);

@@ -289,6 +289,11 @@ export class KataSearch {
       ownership: Array.from(this.ownSum, v => v / n),
       moves: moves.slice(0, maxMoves),
       allMoves: moves,
+      // The network's instinct for every legal move, searched or not (weak levels choose from it).
+      policy: r.moves ? Array.from(r.moves, (m, i) => ({
+        move: toPt(m), prior: r.priors[i],
+        ...(this.twins.has(m) && { twins: this.twins.get(m) }),
+      })) : [],
     };
   }
 
