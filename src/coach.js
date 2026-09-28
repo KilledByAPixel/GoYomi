@@ -1,7 +1,7 @@
 // Teaching logic that sits on top of search results: AI strength levels,
 // move choice, when to pass, dead stones, move grading and plain-language
 // explanations. Pure functions — no DOM, testable in node.
-import { BLACK, WHITE, PASS, POINTS, ptName } from './board.js';
+import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 
 // Every level plays with KataGo (`kata`: see chooseKataMove), weaker ones by
 // reading less and choosing among its instincts more randomly. Calibrated in
@@ -116,6 +116,17 @@ export function shouldPass(game, results, aiColor) {
   // open borders) and every point's owner is very clear.
   const closed = POINTS.every(p => count.owner[p] !== 0);
   return closed && isSettled(board, own, 0.9);
+}
+
+// Is passing now clearly too early for the side to move? When the read's best
+// move isn't a pass and at least `min` empty points are still undecided
+// (ownership between -0.5 and 0.5). Returns the count and the best move.
+export function earlyPass(board, an, min = 4) {
+  const top = an && an.moves && an.moves[0];
+  if (!top || top.move === PASS || !an.ownership) return null;
+  let undecided = 0;
+  for (let i = 0; i < POINTS.length; i++) if (board.color[POINTS[i]] === EMPTY && Math.abs(an.ownership[i]) < 0.5) undecided++;
+  return undecided >= min ? { undecided, move: top.move } : null;
 }
 
 // Winrate / score of the best move in a finished analysis, for the side to move.

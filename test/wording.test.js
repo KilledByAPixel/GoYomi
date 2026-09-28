@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName } from '../src/wording.js';
 import { Game } from '../src/game.js';
 
 const P = parsePt;
@@ -202,4 +202,36 @@ test('atariWarnings: on the AI\'s turn, its own stones in atari are described, n
   assert.ok(w, 'a warning for the AI\'s stone');
   assert.doesNotMatch(w.text, /\. Run at|better to play elsewhere/, w.text);
   assert.match(w.text, /^The AI's stone at A1 is in atari/);
+});
+
+test('regionName: beginner and other wording', () => {
+  assert.equal(regionName(P('G3'), 'beginner'), 'bottom-right corner');
+  assert.equal(regionName(P('E2'), 'improving'), 'lower side');
+  assert.equal(regionName(P('E5'), 'beginner'), 'middle');
+});
+
+// Black is the player, White the AI; the last move is White's.
+const afterAI = moves => { const g = new Game(); for (const m of moves.split(' ')) g.play(P(m)); return g; };
+const read = (...pts) => ({ moves: pts.map(p => ({ move: p === 'pass' ? -1 : P(p) })) });
+
+test('ignoreNote: a far best reply means the AI move needn\'t be answered', () => {
+  const g = afterAI('E5 A1');
+  assert.equal(ignoreNote(g.board, P('A1'), read('G3'), 'beginner'),
+    'You don\'t need to answer this directly. The biggest move now is around the bottom-right corner.');
+});
+
+test('ignoreNote: silent when the best reply is near, a pass, or the player is in atari', () => {
+  const g = afterAI('E5 A1');
+  assert.equal(ignoreNote(g.board, P('A1'), read('B2'), 'beginner'), null, 'near');
+  assert.equal(ignoreNote(g.board, P('A1'), read('pass'), 'beginner'), null, 'pass');
+  assert.equal(ignoreNote(g.board, P('A1'), null, 'beginner'), null, 'no read');
+  const at = afterAI('A1 B1 A2 J9 E5 B2'); // White's B2 leaves Black's A1-A2 with one liberty
+  assert.equal(ignoreNote(at.board, P('B2'), read('G7'), 'beginner'), null, 'atari');
+});
+
+test('hintReason: a tactical point in words, nothing for plain shape', () => {
+  const g = afterAI('A2 A1 B2 J9'); // Black to move; B1 captures A1
+  assert.match(hintReason(g.board, P('B1'), { level: 'beginner', you: BLACK }), /^B1: Captures 1 stone/);
+  const empty = new Game();
+  assert.equal(hintReason(empty.board, P('E5'), { level: 'beginner', you: BLACK }), null);
 });

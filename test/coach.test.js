@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -258,4 +258,18 @@ test('readRecipe: an after-read plays the child\'s colour when variations differ
   const ee = g.root.children[0], cc = ee.children.find(c => c.move === P('C7'));
   assert.equal(cc.color, WHITE);
   assert.deepEqual(readRecipe(g, { kind: 'after', base: ee, move: cc.move }), g.recipe(cc));
+});
+
+test('earlyPass: open points left means too early; a pass-first read or a settled board doesn\'t', () => {
+  const g = new Game();
+  g.play(parsePt('E5'));
+  const open = { moves: [{ move: parsePt('C3') }], ownership: new Array(81).fill(0) };
+  const e = earlyPass(g.board, open);
+  assert.equal(e.move, parsePt('C3'));
+  assert.equal(e.undecided, 80);
+  assert.equal(earlyPass(g.board, { ...open, moves: [{ move: -1 }] }), null, 'the coach would pass');
+  const settled = { moves: [{ move: parsePt('C3') }], ownership: new Array(81).fill(0.9) };
+  settled.ownership[0] = settled.ownership[1] = settled.ownership[2] = 0; // 3 undecided < 4
+  assert.equal(earlyPass(g.board, settled), null, 'fewer than 4 undecided');
+  assert.equal(earlyPass(g.board, null), null, 'no read');
 });

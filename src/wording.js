@@ -2,9 +2,10 @@
 // (coach.js) and move facts (explain.js) into sentences. Levels: 'beginner'
 // (stones and liberties, no numbers), 'improving' (points, threats, purpose)
 // and 'strong' (everything, tersely).
-import { BLACK, PASS, ptName } from './board.js';
+import { BLACK, WHITE, PASS, D4, ptName, ptX, ptY } from './board.js';
 import { GRADES, threats } from './coach.js';
 import { ladderCapture } from './ladder.js';
+import { boardFacts, regionOf } from './explain.js';
 
 export const COACH_FOR = [
   { key: 'auto', label: 'Match AI strength' },
@@ -79,6 +80,42 @@ const REGION_NAMES = {
   other: ['upper-left corner', 'upper side', 'upper-right corner', 'left side', 'centre', 'right side',
     'lower-left corner', 'lower side', 'lower-right corner'],
 };
+
+// A point's area of the board, worded for the coach level.
+export const regionName = (p, level) => REGION_NAMES[level === 'beginner' ? 'beginner' : 'other'][regionOf(p)];
+
+// After the AI's move (board: the position after it, the player to move): when
+// the coach's best reply is somewhere else, the move needn't be answered. Names
+// the area of the biggest move, not the point (Hint gives that). Silent when
+// the reply is near the AI's stone or on a liberty of a chain touching it, when
+// the AI's move left the player's stones in atari, or when the coach would pass.
+export function ignoreNote(board, aiMove, an, level) {
+  const top = an && an.moves && an.moves[0];
+  if (!top || top.move === PASS || aiMove === PASS) return null;
+  const player = board.toPlay, candidates = [top.move, ...(top.twins || [])];
+  const near = q => Math.max(Math.abs(ptX(q) - ptX(aiMove)), Math.abs(ptY(q) - ptY(aiMove))) <= 2;
+  if (candidates.some(near)) return null;
+  for (const p of [aiMove, ...D4.map(d => aiMove + d)]) {
+    const c = board.color[p];
+    if (c !== BLACK && c !== WHITE) continue;
+    const libs = board.chainLibs(p);
+    if (c === player && libs.length === 1) return null;
+    if (candidates.some(q => libs.includes(q))) return null;
+  }
+  return `You don't need to answer this directly. The biggest move now is around the ${regionName(top.move, level)}.`;
+}
+
+// Why a hinted move is worth playing, when it has a tactical point: captures,
+// saves, ataris, connects or cuts. Null for plain shape, which says little.
+const HINT_FACTS = new Set(['capture', 'rescue', 'atari', 'connect', 'separates']);
+export function hintReason(board, move, ctx) {
+  if (move === PASS) return null;
+  const after = board.clone();
+  after.play(move);
+  const facts = boardFacts(board, after, move).filter(f => HINT_FACTS.has(f.type));
+  const line = facts.length ? describe(facts, { level: ctx.level, you: ctx.you, mover: board.toPlay, intent: true })[0] : null;
+  return line ? `${ptName(move)}: ${line}` : null;
+}
 
 // One verb for regions of the same kind: "claims the upper side and the upper-left corner".
 function regionPhrase(regions, level, w, mover) {
