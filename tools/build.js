@@ -169,6 +169,7 @@ html = html.replace(tag, '<script defer src="app.js"></script>');
 files.set('index.html', Buffer.from(html));
 files.set('style.css', fs.readFileSync(path.join(root, 'style.css')));
 files.set('LICENSE', fs.readFileSync(path.join(root, 'LICENSE')));
+files.set('THIRD_PARTY_NOTICES.txt', fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.txt')));
 
 for (const [name, data] of files) {
   fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
