@@ -280,6 +280,9 @@ export class Net {
   // scoreMean, ownership (81, +1 = side to move) }.
   decode(row) {
     const sc = AREA + 1 + 3;
+    // A broken backend (say, reduced GPU precision) can return NaN: fail, so the
+    // game falls back, instead of searching on nonsense and passing every move.
+    for (let i = 0; i < row.length; i++) if (!Number.isFinite(row[i])) throw new Error('the network returned invalid numbers');
     const v = [row[AREA + 1], row[AREA + 2], row[AREA + 3]];
     const mx = Math.max(...v), e = v.map(x => Math.exp(x - mx)), sum = e[0] + e[1] + e[2];
     const noResult = e[2] / sum;

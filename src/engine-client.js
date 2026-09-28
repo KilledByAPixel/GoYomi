@@ -145,20 +145,30 @@ export const FULL_RATE = 150;
 // The one worker that runs the network for every KataGo engine.
 export class KataWorker {
   // startupMs: how long loading may take (a stalled download or GPU set-up) before giving up.
-  constructor({ startupMs = 60000 } = {}) {
+  // stallMs: how long the network may stay silent with a search waiting (a lost GPU
+  // context can leave a run that never ends) before KataGo counts as failed. The
+  // longest silence in normal play is the AI's move, at most 15 s.
+  constructor({ startupMs = 60000, stallMs = 30000 } = {}) {
     this.worker = new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' });
     this.engines = new Map();
     this.info = null;
     this.dead = false;       // failed: searches end at once
     this.onFail = null;      // called when KataGo stops working after it had started
     this.startupMs = startupMs;
+    this.stallMs = stallMs;
+    this.heard = 0;          // when the worker last said anything, or last got work while idle
     this.ready = new Promise(resolve => { this.resolveReady = resolve; });
     this.worker.onmessage = e => {
       const msg = e.data;
       if (this.dead) return;   // a late message from a worker we've given up on
+      this.heard = performance.now();
       if (msg.type === 'ready') {
         clearTimeout(this.timer);
         this.info = { ok: true, backend: msg.backend, rate: msg.rate, batch: msg.batch };
+        this.watchdog = setInterval(() => {
+          if ([...this.engines.values()].some(e => e.busy) && performance.now() - this.heard > this.stallMs) this.fail('KataGo stopped responding');
+        }, this.stallMs / 4);
+        if (this.watchdog.unref) this.watchdog.unref(); // node (tests): don't hold the process open
         this.resolveReady(this.info);
         return;
       }
@@ -182,6 +192,7 @@ export class KataWorker {
     const started = !!(this.info && this.info.ok);
     this.dead = true;
     clearTimeout(this.timer);
+    clearInterval(this.watchdog);
     this.info = { ok: false, message };
     this.resolveReady(this.info);
     try { this.worker.terminate(); } catch { /* already gone */ }
@@ -190,7 +201,12 @@ export class KataWorker {
     if (started && this.onFail) this.onFail(message);
   }
 
-  post(msg) { if (!this.dead) this.worker.postMessage(msg); }
+  post(msg) {
+    if (this.dead) return;
+    // Work for an idle worker starts the silence clock afresh.
+    if (msg.type === 'search' && ![...this.engines.values()].some(e => e.busy)) this.heard = performance.now();
+    this.worker.postMessage(msg);
+  }
 
   // Visits for a read worth `playouts` built-in playouts on this device.
   visits(playouts) {

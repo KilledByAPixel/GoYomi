@@ -20,13 +20,17 @@ const BACKENDS = ['webgpu', 'webgl', 'wasm', 'cpu'];
 let loading = null;
 
 async function load(only) {
+  // Both downloads at once: on a slow connection they're most of the start-up time.
+  const netBytes = fetch(NET).then(res => {
+    if (!res.ok) throw new Error(`network file: HTTP ${res.status}`);
+    return res.arrayBuffer();
+  });
+  netBytes.catch(() => {}); // reported below; not an unhandled rejection if tf.js fails first
   const tf = await import(VENDOR + 'tf.js');
   tf.setWasmPaths(VENDOR);
   // Threaded WASM needs cross-origin isolation, which static hosts rarely give.
   tf.env().set('WASM_HAS_MULTITHREAD_SUPPORT', false);
-  const res = await fetch(NET);
-  if (!res.ok) throw new Error(`network file: HTTP ${res.status}`);
-  const parsed = parseModel(new Uint8Array(await res.arrayBuffer()));
+  const parsed = parseModel(new Uint8Array(await netBytes));
   // Setting a backend up, building the net, warming up and benchmarking are one
   // attempt: if any step fails, the next backend gets its turn.
   const best = await chooseBackend(only ? [only] : BACKENDS, async b => {
@@ -44,7 +48,8 @@ async function load(only) {
   });
   if (!best) throw new Error('no TensorFlow.js backend works here');
   if (!await tf.setBackend(best.backend)) throw new Error(`can't switch back to ${best.backend}`);
-  sched.evaluator = new Evaluator(best.net, { maxBatch: best.batch });
+  // About 1.9 KB a cached position: 15k is ~30 MB, fine on phones, and still covers a game's reads.
+  sched.evaluator = new Evaluator(best.net, { maxBatch: best.batch, cacheSize: 15000 });
   return { backend: best.backend, rate: best.rate, batch: best.batch };
 }
 

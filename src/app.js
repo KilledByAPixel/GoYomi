@@ -1106,7 +1106,9 @@ function setupDialog() {
   $('#levelList').innerHTML = LEVELS.map((l, i) =>
     `<label class="level"><input type="radio" name="level" value="${i}"><span><b>${i + 1} · ${l.name}</b><small>${l.blurb}</small></span></label>`).join('');
   const dlg = $('#newGameDlg'), f = dlg.querySelector('form');
-  $('#dlgCancel').onclick = () => dlg.close('cancel');
+  // Guarded: for a few minutes after a deploy a visitor can have the older page with this script.
+  const cancel = $('#dlgCancel');
+  if (cancel) cancel.onclick = () => dlg.close('cancel');
   f.elements.handicap.onchange = () => { f.elements.komi.value = +f.elements.handicap.value ? '0.5' : '7'; };
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'ok') return;

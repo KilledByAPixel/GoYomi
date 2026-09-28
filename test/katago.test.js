@@ -161,3 +161,12 @@ test('a fixed batch pads every run to one size and gives the same results', asyn
   assert.deepEqual(padded.sizes, [8], 'padded runs are always 8 rows (one GPU program)');
   assert.deepEqual(padded.moves, plain.moves);
 });
+
+test('a network output that isn\'t a number is an error, not a move', async () => {
+  const { Net } = await import('../src/katago/model.js');
+  const net = Object.assign(Object.create(Net.prototype), { scoreChannels: 4, post: { scoreMean: 20, lead: 20 } });
+  const row = new Float32Array(82 + 3 + 4 + 81);
+  assert.doesNotThrow(() => net.decode(row));
+  row[83] = NaN;
+  assert.throws(() => net.decode(row), /invalid/);
+});

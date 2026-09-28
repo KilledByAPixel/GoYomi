@@ -143,3 +143,37 @@ test('KataWorker: when the network fails, KataGo is marked failed before the AI\
   for (const m of posted) { w.onmessage({ data: m }); await new Promise(r => setTimeout(r, 0)); }
   assert.equal(endedAtFail, false, `messages ${posted.map(m => m.type)}`);
 });
+
+// A host with a short stall limit, started.
+async function stallHost(stallMs) {
+  stubs.length = 0;
+  const host = new KataWorker({ stallMs }), failures = [];
+  host.onFail = m => failures.push(m);
+  const ready = host.load();
+  stubs[0].onmessage({ data: { type: 'ready', backend: 'webgl', rate: 300, batch: 16 } });
+  await ready;
+  return { host, failures, w: stubs[0] };
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+test('KataWorker: a network that stops answering mid-search is treated as a failure', { timeout: 3000 }, async () => {
+  const { host, failures } = await stallHost(100);
+  const p = new KataEngine('kopponent', host, { priority: 1 }).search({}, { visits: 128 });
+  await wait(400);
+  assert.deepEqual(failures, ['KataGo stopped responding']);
+  assert.equal(await p, null);
+  assert.equal(host.dead, true);
+});
+
+test('KataWorker: a busy network that keeps answering, and an idle one, are left alone', { timeout: 3000 }, async () => {
+  const { host, failures, w } = await stallHost(100);
+  const eng = new KataEngine('kcoach0', host);
+  const p = eng.search({}, { visits: 400 });
+  for (let i = 0; i < 8; i++) { await wait(50); w.onmessage({ data: { type: 'progress', engine: 'kcoach0', id: w.sent.id, results: result(10) } }); }
+  w.onmessage({ data: { type: 'done', engine: 'kcoach0', id: w.sent.id, results: result(400) } });
+  assert.ok(await p);
+  await wait(400); // nothing pending: silence is fine
+  assert.deepEqual(failures, []);
+  assert.equal(host.dead, false);
+  host.fail('test over');
+});
