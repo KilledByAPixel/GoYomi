@@ -206,6 +206,9 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 .learn summary { cursor: pointer; font-weight: 600; }
 .learn p, .learn ul { margin: 6px 0; font-size: 14px; }
 .learn ul { padding-left: 20px; }
+.credits { font-size: 12px; line-height: 1.5; color: var(--muted); text-align: center; padding: 0 8px; }
+.credits a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.credits a:hover { color: var(--accent); }
 
 .score-panel { border: 2px solid var(--accent); }
 .score-panel .big { font-size: 20px; font-weight: 700; margin: 4px 0 8px; }
