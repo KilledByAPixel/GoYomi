@@ -281,7 +281,11 @@ export class Game {
         // Only the first node may set up stones; later changes aren't supported.
         if (!(first && k === 0) && (props.AB || props.AW || props.AE)) throw new Error('GoYomi can\'t load records that add or remove stones during the game.');
         const col = props.B ? BLACK : props.W ? WHITE : 0;
-        if (!col) return;
+        if (!col) {
+          // A comment on a node without a move belongs to the move before it (the root's is read above).
+          if (props.C && !(first && k === 0)) node.comment = node.comment ? `${node.comment}\n\n${props.C[0]}` : props.C[0];
+          return;
+        }
         game.current = node;
         // Players alternate in the game tree. The very first move decides who
         // starts; later, a move by the player who just moved means the other passed.

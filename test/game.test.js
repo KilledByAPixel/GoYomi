@@ -239,3 +239,12 @@ test('SGF: a starting stone with no liberties is refused', () => {
   // Stones sharing a liberty are fine.
   assert.doesNotThrow(() => Game.fromSGF('(;GM[1]SZ[9]AB[ac][bb]AW[aa][ab][ba])'));
 });
+
+test('SGF: a comment on a node without a move is kept, on the move before it', () => {
+  const g = Game.fromSGF('(;GM[1]FF[4]SZ[9]C[start];B[ee]C[first];C[note];W[cc])');
+  assert.equal(g.root.comment, 'start');
+  const e5 = g.root.children[0];
+  assert.equal(e5.comment, 'first\n\nnote');
+  assert.equal(e5.children[0].comment, '');
+  assert.match(g.toSGF(), /B\[ee\]C\[first\n\nnote\]/);
+});
