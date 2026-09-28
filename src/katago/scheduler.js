@@ -2,7 +2,9 @@
 // round the most urgent searches fill one batch, and each gets its outputs back.
 // No DOM or TF.js here; the worker supplies the evaluator, `post` and `yieldFn`.
 export class Scheduler {
-  constructor({ post, yieldFn }) {
+  // now: the clock (tests pass a fake one).
+  constructor({ post, yieldFn, now = () => performance.now() }) {
+    this.now = now;
     this.post = post;          // sends a message to the page
     this.yieldFn = yieldFn;    // lets 'stop' and new searches in between rounds
     this.evaluator = null;     // set once the network has loaded
@@ -29,12 +31,11 @@ export class Scheduler {
     this.pumping = true;
     try {
       while (this.jobs.size) {
-        const round = performance.now();
+        const round = this.now();
         let live = [...this.jobs.values()];
         // The AI's move goes first: background reads wait while one is outstanding,
         // and the time they wait doesn't count against their own time limit.
         const top = Math.max(...live.map(j => j.priority || 0));
-        const held = live.filter(j => (j.priority || 0) < top);
         live = live.filter(j => (j.priority || 0) === top);
         // No more leaves than one batch holds: with more searches than that, they take turns.
         const cap = this.evaluator.maxBatch;
@@ -47,8 +48,9 @@ export class Scheduler {
         const all = parts.flatMap(p => p.sels);
         const outs = all.length ? await this.evaluator.evaluate(all.map(s => s.pos)) : [];
         let at = 0;
-        const now = performance.now();
-        for (const j of held) j.paused = (j.paused || 0) + (now - round);
+        const now = this.now();
+        // Held back this round, including jobs that arrived while the net ran.
+        for (const j of this.jobs.values()) if ((j.priority || 0) < top) j.paused = (j.paused || 0) + now - Math.max(round, j.started);
         for (const { j, sels } of parts) {
           const mine = outs.slice(at, at += sels.length);
           if (this.jobs.get(j.engine) !== j) continue;   // stopped or replaced while the net ran

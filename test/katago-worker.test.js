@@ -88,15 +88,33 @@ test('Scheduler: a search with its own batch takes no more leaves a round than t
   assert.deepEqual(sizes, [4, 4, 4]);
 });
 
-test('Scheduler: a coach read waiting behind the AI keeps its time for when it runs', async () => {
-  const posted = [];
-  const s = new Scheduler({ post: m => posted.push(m), yieldFn: () => Promise.resolve() });
-  // Each round takes about 20 ms, like a slow device.
-  s.evaluator = { maxBatch: 4, evaluate: async ps => { await new Promise(r => setTimeout(r, 20)); return ps.map(() => ({})); } };
-  const now = performance.now();
-  s.add({ ...job('kopponent', 60, 1), started: now });                 // about 15 rounds: 300 ms
-  s.add({ ...job('kcoach0', 8), maxTime: 100, started: now });           // 2 rounds, allowed 100 ms
+// A scheduler on a fake clock: each evaluation moves time on by `ms(round)`,
+// and `during(round)` runs while that evaluation is still in flight.
+function clocked({ ms = () => 20, during = () => {} } = {}) {
+  const posted = [], clock = { t: 0 };
+  const s = new Scheduler({ post: m => posted.push(m), yieldFn: () => Promise.resolve(), now: () => clock.t });
+  let round = 0;
+  s.evaluator = { maxBatch: 4, evaluate: async ps => { const r = round++; clock.t += ms(r) / 2; during(r); clock.t += ms(r) / 2; return ps.map(() => ({})); } };
+  return { s, posted, clock };
+}
+
+test('Scheduler: a coach read queued behind the AI keeps its time for when it runs', async () => {
+  const { s, posted } = clocked();
+  s.add({ ...job('kopponent', 60, 1), started: 0 });        // 15 rounds of 20 ms: 300 ms
+  s.add({ ...job('kcoach0', 8), maxTime: 100, started: 0 });  // 2 rounds, allowed 100 ms
   await idle(s);
-  const coach = posted.find(m => m.engine === 'kcoach0');
-  assert.equal(coach.results.playouts, 8, 'the coach got its whole read after the AI finished');
+  assert.equal(posted.find(m => m.engine === 'kcoach0').results.playouts, 8, 'the coach got its whole read after the AI finished');
+});
+
+test('Scheduler: a coach read arriving while the AI\'s evaluation runs keeps its time too', async () => {
+  let s0, clock0;
+  // The AI's first round takes 150 ms; the coach arrives halfway through it.
+  const { s, posted, clock } = clocked({
+    ms: r => r === 0 ? 150 : 20,
+    during: r => { if (r === 0) s0.add({ ...job('kcoach0', 8), maxTime: 100, started: clock0.t }); },
+  });
+  s0 = s; clock0 = clock;
+  s.add({ ...job('kopponent', 60, 1), started: 0 });
+  await idle(s);
+  assert.equal(posted.find(m => m.engine === 'kcoach0').results.playouts, 8, 'the coach got its whole read after the AI finished');
 });
