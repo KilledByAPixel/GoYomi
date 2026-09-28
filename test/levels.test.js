@@ -48,11 +48,11 @@ test('chooseKataMove: mirror images vary; nothing to play means pass', () => {
   assert.equal(chooseKataMove({ allMoves: [], policy: [{ move: PASS, prior: 1 }] }, { visits: 1, temp: 1 }), PASS);
 });
 
-test('chooseKataMove: passes when passing is the top instinct or the most-visited move', () => {
+test('chooseKataMove never passes while it has a move: passing is for shouldPass to decide', () => {
   const done = { allMoves: [], policy: [{ move: PASS, prior: 0.9 }, { move: P('A1'), prior: 0.1 }] };
-  assert.equal(chooseKataMove(done, { visits: 1, temp: 1.5, floor: 0.002, miss: 0 }), PASS);
+  assert.equal(ptName(chooseKataMove(done, { visits: 1, temp: 1.5, floor: 0.002, miss: 0 })), 'A1');
   const searched = { allMoves: [{ move: PASS, visits: 40, prior: 0.6 }, { move: P('A1'), visits: 5, prior: 0.1 }], policy: [] };
-  assert.equal(chooseKataMove(searched, { visits: 48, temp: 0.2, floor: 0.01 }), PASS);
+  assert.equal(ptName(chooseKataMove(searched, { visits: 48, temp: 0.2, floor: 0.01 })), 'A1');
 });
 
 test('shouldPass: a 1-visit read (no visited moves) decides by the network\'s instinct', () => {
@@ -93,4 +93,18 @@ test('two Pebbles finish a game by passing', async () => {
   while (!game.isOver() && game.current.depth < 200) game.play((await levelMove(game, LEVELS[0], { engine: 'katago', evaluator, rand })).move);
   assert.ok(game.isOver(), `still playing after ${game.current.depth} moves`);
   assert.ok(game.current.depth > 30, `passed too early (${game.current.depth} moves)`);
+});
+
+// After you pass, Pebble's instinct here is to pass too, but its deeper check
+// (33 visits) says E2 is still worth playing: the deeper check decides.
+const INSTINCT_PASS = '(;GM[1]FF[4]SZ[9]KM[7]RU[Chinese];B[de];W[fe];B[eg];W[ec];B[dc];W[db];B[cc];W[fg];B[fh];W[ef];B[gg];W[df];B[ff];W[ee];B[cb];W[eb];B[cf];W[ce];B[be];W[dd];B[cg];W[hf];B[gf];W[ge];B[hg];W[bf];B[bd];W[dg];B[dh];W[ch];B[bg];W[he];B[da];W[ea];B[ca];W[ig];B[ih];W[if];B[hh];W[cd];B[])';
+
+test('after you pass, a weak level plays on when its deeper check says so', async () => {
+  const evaluator = new Evaluator((await loadNet()).net, { symmetry: 0 });
+  for (let i = 0; i < 5; i++) {
+    const game = Game.fromSGF(INSTINCT_PASS);
+    while (game.current.children.length) game.redo();
+    const { move } = await levelMove(game, LEVELS[0], { engine: 'katago', evaluator, rand: seeded(i + 1) });
+    assert.notEqual(move, PASS, `try ${i + 1}: Pebble passed`);
+  }
 });

@@ -50,10 +50,10 @@ export function chooseMove(results, level, rand = Math.random) {
 }
 
 // Picks a KataGo level's move. A move's share is its visits when the level
-// searched, else the network's prior (its instinct, results.policy). When
-// passing is the top share, it passes: nothing is left worth playing, and a
-// losing weak level mustn't fill its own territory forever. Otherwise the
-// candidates are moves with at least `floor` times the top share, drawn with
+// searched, else the network's prior (its instinct, results.policy). Passing
+// is shouldPass's decision (it passes when passing is the top move of the read
+// it's given, deeper after the opponent passes), so this only plays stones:
+// the candidates are moves with at least `floor` times the top share, drawn with
 // weight share^(1/temp); temp 0 plays the top move. With chance `miss`, any
 // legal move is drawn by prior at temperature 3: the lowest levels' real
 // mistakes (a missed capture, a stone left in atari).
@@ -65,11 +65,10 @@ export function chooseKataMove(results, kata, rand = Math.random) {
     for (let i = 0; i < pool.length; i++) if ((r -= w[i]) <= 0) return pick(pool[i]);
     return pick(pool[0]);
   };
-  const all = (kata.visits > 1 ? (results.allMoves || results.moves || []).map(m => ({ ...m, share: m.visits }))
-    : (results.policy || []).map(m => ({ ...m, share: m.prior }))).sort((a, b) => b.share - a.share);
-  if (!all.length || all[0].move === PASS) return PASS;
-  const list = all.filter(m => m.move !== PASS);
   const byPrior = (results.policy || []).filter(m => m.move !== PASS && m.prior > 0).map(m => ({ ...m, share: m.prior }));
+  const list = (kata.visits > 1 ? (results.allMoves || results.moves || []).filter(m => m.move !== PASS).map(m => ({ ...m, share: m.visits }))
+    : byPrior).sort((a, b) => b.share - a.share);
+  if (!list.length) return PASS;
   if (kata.miss && rand() < kata.miss && byPrior.length) return draw(byPrior, 3);
   if (!kata.temp) return pick(list[0]);
   return draw(list.filter(m => m.share >= list[0].share * (kata.floor ?? 0.05)), kata.temp);
