@@ -37,6 +37,8 @@ const DEFAULTS = {
   coachEngine: 'katago',     // 'katago' or 'builtin'
   gradeAI: false,
   findYourself: false,
+  lastHuman: BLACK,          // the colour played before loading a game into study mode
+  studyFromImport: false,    // study mode came from loading a game, not from New game
   coachFor: 'auto',
   speak: false,
   sound: true,
@@ -113,6 +115,13 @@ const kindOf = results => results && results.engine === 'katago' ? 'katago' : 'b
 // The coach waits for KataGo while it loads; resolves once it's settled either way.
 const kataSettled = () => settings.coachEngine === 'katago' && kata.state === 'loading' ? kata.host.ready : null;
 
+// A failure's reason in plain words, without file names or web addresses.
+function plainReason(message = '') {
+  if (/fetch|import|HTTP|network file|load/i.test(message)) return 'a file it needs didn\'t download';
+  if (/too long/i.test(message)) return 'it took too long to start';
+  return message.replace(/\s*\(?https?:\/\/\S+\)?/g, '').trim() || 'an unknown error';
+}
+
 function startKata() {
   if (kata.state !== 'off') return;
   kata.state = 'loading';
@@ -122,7 +131,7 @@ function startKata() {
   kata.host.onFail = message => {
     kata.state = 'failed';
     kata.info = kata.host.info;
-    flash(`KataGo stopped working (${message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
+    flash(`KataGo stopped working (${plainReason(message)}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
     useCoachEngine();
     // A move KataGo was thinking about is played by the built-in engine instead.
     // Same request (the "AI move" button's too), if the position hasn't changed.
@@ -140,7 +149,7 @@ function startKata() {
     kata.state = info.ok && info.rate >= MIN_RATE ? 'ready' : 'failed';
     if (kata.state === 'failed') {
       flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`
-        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower. On a slow connection, reloading the page may fix it.`);
+        : `KataGo couldn't start here (${plainReason(info.message)}), so the AI and coach use GoYomi's own engine, which is much weaker and slower. On a slow connection, reloading the page may fix it.`);
     }
     useCoachEngine();
   });
@@ -213,6 +222,8 @@ function playMove(move, { human = false, news = '' } = {}) {
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   if (human) hush(); // a new move: they're done listening
+  if (hintsShown(parent)) parent.helped = true;
+  const regrade = !!(parent.children.find(c => c.move === move) || {}).grade;
   const node = game.play(move);
   if (news) flash(news);
   else {
@@ -224,6 +235,7 @@ function playMove(move, { human = false, news = '' } = {}) {
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
   tryGrade(node);
+  if (regrade) { node.announced = false; announceGrade(node); }
   if (game.isOver()) { save(); enterScoring(); return true; }
   afterChange();
   // Replaying a move that already has a (taken-back) AI reply below it: the
@@ -363,6 +375,7 @@ async function aiMove(force = false, best = false) {
   const color = node.board.toPlay;
   const lv = best ? { playouts: settings.coachPlayouts, temp: 0, blunder: 0 } : level();
   aiNode = node; aiBest = best; aiForce = force;
+  if (best) node.helped = true; // the "AI move" button plays the coach's move: not found by the player
   render();
   const t0 = performance.now();
   const opponent = await aiEngine(best);
@@ -560,12 +573,17 @@ function announceGrade(node) {
   const cur = game.current;
   if (node.announced || node.move === PASS || !settings.show.feedback || (node !== cur && node !== cur.parent)) return;
   node.announced = true;
+  announce(gradeSpeech(node));
+}
+
+// What the coach says about a graded move, as plain text ("Coach: Mistake. …").
+function gradeSpeech(node) {
   const level = coachLevel(), facts = factsFor(node), shown = levelGrade(node.grade, level, facts);
   const all = describe(facts, { level, mover: node.color, you: settings.human, shown });
   const lines = puzzle(node, shown) ? hideAnswer(all, answerPoints(node)) : all;
   const said = puzzle(node, shown) ? 'There was something better here. Can you find it?'
     : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}`;
-  announce(plainText(`Coach: ${shown.label}. ${said} ${lines.join(' ')}`));
+  return plainText(`Coach: ${shown.label}. ${said} ${lines.join(' ')}`);
 }
 
 // What the coach knows about node's move so far (explain.js), from whatever
@@ -659,7 +677,9 @@ function goTo(node) {
   locatePt = null; // the button it came from may be rebuilt without a focusout
   game.goTo(node);
   save(); render(); scheduleCoach();
-  announce(positionPhrase(node.depth, node.color, node.move));
+  // Stepping through a game: the move, and the coach's verdict on it when there is one.
+  const graded = node.move !== PASS && node.grade && isGraded(node) && settings.show.feedback;
+  announce(positionPhrase(node.depth, node.color, node.move) + (graded ? ` ${gradeSpeech(node)}` : ''));
   aiMove(); // back at the newest position with the AI to move (only fires on a leaf)
 }
 
@@ -686,6 +706,7 @@ function tryInstead(node) {
   const g = node.grade;
   if (!g || !node.parent) return;
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
+  node.parent.helped = true;
   goTo(node.parent);
   playMove(g.bestMove, { human: true });
 }
@@ -928,21 +949,23 @@ function renderReview() {
 // Under the AI's latest move: "you don't need to answer this", once the coach
 // has read the player's position (games against the AI only).
 function ignoreLine(node) {
-  if (!settings.human || !settings.coach || node.color === settings.human || node !== game.current || !node.analysisDone) return null;
+  if (!settings.human || !settings.coach || resigned || node.color === settings.human || node !== game.current || !node.analysisDone) return null;
   return ignoreNote(node.board, node.move, node.analysis, coachLevel());
 }
 
 // Find it yourself: the player's Mistake or Blunder against the AI, with the
 // coach's move hidden until they ask (Show answer) or find a good move.
 const puzzle = (node, shown) => settings.findYourself && !!settings.human && node.color === settings.human
-  && !node.revealed && (shown.key === 'mistake' || shown.key === 'blunder');
-// A Good or Best move played from a position the player went back to with Try again.
+  && !node.revealed && !resigned && (shown.key === 'mistake' || shown.key === 'blunder');
 // The coach's move for node and its mirror images: what a puzzle mustn't name.
 function answerPoints(node) {
   const g = node.grade, e = node.parent.analysis && entryFor(node.parent.analysis, g.bestMove);
   return [g.bestMove, ...((e && e.twins) || [])].filter(q => q !== PASS);
 }
-const found = (node, shown) => !!(node.parent && node.parent.retry) && (shown.key === 'best' || shown.key === 'good');
+// A Good or Best move played from a position the player went back to with Try
+// again, without being shown the answer (Show answer, Try instead, a hint or
+// the "AI move" button all mark the position as helped).
+const found = (node, shown) => !!(node.parent && node.parent.retry && !node.parent.helped) && (shown.key === 'best' || shown.key === 'good');
 
 function retry(node) {
   node.parent.retry = true;
@@ -951,6 +974,7 @@ function retry(node) {
 
 function reveal(node) {
   node.revealed = true;
+  node.parent.helped = true;
   render();
   const level = coachLevel(), shown = levelGrade(node.grade, level, factsFor(node));
   announce(plainText(`Coach: ${verdict(node.grade, level, shown)}`));
@@ -1118,6 +1142,8 @@ function load() {
     if (!['katago', 'builtin'].includes(settings.coachEngine)) settings.coachEngine = DEFAULTS.coachEngine;
     settings.gradeAI = !!settings.gradeAI;
     settings.findYourself = !!settings.findYourself;
+    if (![BLACK, WHITE].includes(settings.lastHuman)) settings.lastHuman = DEFAULTS.lastHuman;
+    settings.studyFromImport = !!settings.studyFromImport;
     settings.speak = !!settings.speak;
     if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
@@ -1163,7 +1189,9 @@ function importSGF(text) {
     cancelAI();
     stopCoach();
     game = g;
+    if (settings.human) settings.lastHuman = settings.human;
     settings.human = 0;
+    settings.studyFromImport = true;
     mode = 'play'; scoring = null; resigned = 0; better = null;
     syncOptions();
     flash('Game loaded in study mode (you play both colours). Step through it and watch the coach.');
@@ -1177,7 +1205,8 @@ function importSGF(text) {
 
 function openNewGame() {
   const dlg = $('#newGameDlg'), f = dlg.querySelector('form');
-  f.elements.color.value = String(settings.human);
+  // After loading a game (study mode), offer the colour the player had before.
+  f.elements.color.value = String(settings.studyFromImport ? settings.lastHuman : settings.human);
   f.elements.level.value = String(settings.level);
   f.elements.handicap.value = String(settings.handicap);
   f.elements.komi.value = String(settings.komi);
@@ -1196,6 +1225,7 @@ function setupDialog() {
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'ok') return;
     settings.human = +f.elements.color.value;
+    settings.studyFromImport = false;
     settings.level = +f.elements.level.value;
     settings.handicap = +f.elements.handicap.value;
     settings.komi = parseFloat(f.elements.komi.value) || 0;
@@ -1270,6 +1300,7 @@ function setupControls() {
   $('#btnUndo').onclick = takeBack;
   $('#btnHint').onclick = () => {
     hintOn = !hintOn;
+    if (hintOn) game.current.helped = true; // seeing the hint means a good move here wasn't found alone
     const an = game.current.analysis;
     if (hintOn && !an) flash('The coach is still reading this position…');
     render();
