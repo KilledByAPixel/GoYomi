@@ -3,19 +3,19 @@
 // explanations. Pure functions — no DOM, testable in node.
 import { BLACK, WHITE, PASS, POINTS, ptName } from './board.js';
 
-// Each level beat the one below it clearly in self-play (tools/levels.js).
-// The last runs on KataGo instead of the built-in engine.
+// Every level plays with KataGo (`kata`: see chooseKataMove), weaker ones by
+// reading less and choosing among its instincts more randomly. The built-in
+// fields (playouts, temp, blunder) are the fallback where KataGo can't run.
 export const LEVELS = [
-  { name: 'Pebble', blurb: 'Plays almost at random. Practise capturing.', playouts: 50, temp: 1, blunder: 0.3 },
-  { name: 'Seedling', blurb: 'Grabs captures, wanders a lot.', playouts: 220, temp: 1.2, blunder: 0.14 },
-  { name: 'Sprout', blurb: 'Knows simple shapes, still misses plenty.', playouts: 400, temp: 1.5, blunder: 0.1 },
-  { name: 'Reed', blurb: 'Fights back, but leaves weaknesses.', playouts: 650, temp: 1.8, blunder: 0.08 },
-  { name: 'Stream', blurb: 'Casual player. Makes real mistakes.', playouts: 2000, temp: 3, blunder: 0.03 },
-  { name: 'River', blurb: 'Solid fighting on a small board.', playouts: 5000, temp: 5, blunder: 0 },
-  { name: 'Mountain', blurb: 'Strong. Punishes overplays.', playouts: 16000, temp: 0, blunder: 0 },
-  { name: 'Dragon', blurb: 'Full strength. Thinks for several seconds.', playouts: 60000, temp: 0, blunder: 0 },
-  // KataGo's network at a fixed number of visits (Dragon stands in where it can't run).
-  { name: 'Phoenix', blurb: 'KataGo\'s neural network. Far beyond Dragon.', katago: true, visits: 128, fallback: 7, playouts: 60000, temp: 0, blunder: 0 },
+  { name: 'Pebble', blurb: 'Just learned the rules. Misses captures: practise capturing.', playouts: 50, temp: 1, blunder: 0.3, kata: { visits: 1, temp: 1.5, floor: 0.002, miss: 0.25 } },
+  { name: 'Seedling', blurb: 'Plays sensible-looking moves, but misses a lot.', playouts: 220, temp: 1.2, blunder: 0.14, kata: { visits: 1, temp: 1.2, floor: 0.005, miss: 0.12 } },
+  { name: 'Sprout', blurb: 'Knows the basics, still leaves weaknesses.', playouts: 400, temp: 1.5, blunder: 0.1, kata: { visits: 1, temp: 1, floor: 0.01, miss: 0.05 } },
+  { name: 'Reed', blurb: 'Fights back and punishes obvious mistakes.', playouts: 650, temp: 1.8, blunder: 0.08, kata: { visits: 1, temp: 0.7, floor: 0.02 } },
+  { name: 'Stream', blurb: 'A casual club player.', playouts: 2000, temp: 3, blunder: 0.03, kata: { visits: 4, temp: 0.6, floor: 0.05 } },
+  { name: 'River', blurb: 'A solid club player.', playouts: 5000, temp: 5, blunder: 0, kata: { visits: 16, temp: 0.4, floor: 0.1 } },
+  { name: 'Mountain', blurb: 'Strong. Reads fights well.', playouts: 16000, temp: 0, blunder: 0, kata: { visits: 48, temp: 0.2, floor: 0.2 } },
+  { name: 'Dragon', blurb: 'Very strong, and still quick.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 128, temp: 0 } },
+  { name: 'Phoenix', blurb: 'Extra hard: KataGo thinking longer. For when Dragon isn\'t enough.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 600, temp: 0 }, maxTime: 10000 },
 ];
 
 const sign = c => c === BLACK ? 1 : -1;
@@ -40,6 +40,32 @@ export function chooseMove(results, level, rand = Math.random) {
   let r = rand() * weights.reduce((a, b) => a + b, 0);
   for (let i = 0; i < pool.length; i++) if ((r -= weights[i]) <= 0) return pick(pool[i]);
   return pick(top);
+}
+
+// Picks a KataGo level's move. A move's share is its visits when the level
+// searched, else the network's prior (its instinct, results.policy). When
+// passing is the top share, it passes: nothing is left worth playing, and a
+// losing weak level mustn't fill its own territory forever. Otherwise the
+// candidates are moves with at least `floor` times the top share, drawn with
+// weight share^(1/temp); temp 0 plays the top move. With chance `miss`, any
+// legal move is drawn by prior at temperature 3: the lowest levels' real
+// mistakes (a missed capture, a stone left in atari).
+export function chooseKataMove(results, kata, rand = Math.random) {
+  const pick = m => m.twins ? [m.move, ...m.twins][(rand() * (m.twins.length + 1)) | 0] : m.move;
+  const draw = (pool, t) => {
+    const w = pool.map(m => Math.pow(m.share, 1 / t));
+    let r = rand() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < pool.length; i++) if ((r -= w[i]) <= 0) return pick(pool[i]);
+    return pick(pool[0]);
+  };
+  const all = (kata.visits > 1 ? (results.allMoves || results.moves || []).map(m => ({ ...m, share: m.visits }))
+    : (results.policy || []).map(m => ({ ...m, share: m.prior }))).sort((a, b) => b.share - a.share);
+  if (!all.length || all[0].move === PASS) return PASS;
+  const list = all.filter(m => m.move !== PASS);
+  const byPrior = (results.policy || []).filter(m => m.move !== PASS && m.prior > 0).map(m => ({ ...m, share: m.prior }));
+  if (kata.miss && rand() < kata.miss && byPrior.length) return draw(byPrior, 3);
+  if (!kata.temp) return pick(list[0]);
+  return draw(list.filter(m => m.share >= list[0].share * (kata.floor ?? 0.05)), kata.temp);
 }
 
 // Average ownership over each chain; chains owned by the other side are dead.
@@ -69,7 +95,9 @@ export function isSettled(board, ownership, clear = 0.7) {
 // Should the AI pass instead of moving?
 export function shouldPass(game, results, aiColor) {
   const board = game.board;
-  const best = (results.allMoves || results.moves)[0];
+  // A 1-visit KataGo read visits no moves: its instinct (the top prior) stands in.
+  const best = (results.allMoves || results.moves)[0]
+    || (results.policy || []).reduce((a, m) => !a || m.prior > a.prior ? m : a, null);
   if (!best || best.move === PASS) return true;
   const own = results.ownership;
   const count = game.score(estimateDead(board, own));
