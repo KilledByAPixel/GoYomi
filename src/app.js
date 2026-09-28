@@ -37,7 +37,7 @@ const DEFAULTS = {
   coachEngine: 'katago',     // 'katago' or 'builtin'
   gradeAI: false,
   findYourself: false,
-  lastHuman: BLACK,          // the colour played before loading a game into study mode
+  lastHuman: BLACK,          // how the player played before loading a game into study mode (0: study)
   studyFromImport: false,    // study mode came from loading a game, not from New game
   coachFor: 'auto',
   speak: false,
@@ -223,7 +223,6 @@ function playMove(move, { human = false, news = '' } = {}) {
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   if (human) hush(); // a new move: they're done listening
-  if (hintsShown(parent)) parent.helped = true;
   const regrade = !!(parent.children.find(c => c.move === move) || {}).grade;
   const node = game.play(move);
   if (news) flash(news);
@@ -236,7 +235,7 @@ function playMove(move, { human = false, news = '' } = {}) {
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
   tryGrade(node);
-  if (regrade) { node.announced = false; announceGrade(node); }
+  if (regrade && isGraded(node)) { node.announced = false; announceGrade(node); }
   if (game.isOver()) { save(); enterScoring(); return true; }
   afterChange();
   // Replaying a move that already has a (taken-back) AI reply below it: the
@@ -695,6 +694,7 @@ function nav(where) {
 function showBetter(node) {
   const g = node.grade, parent = node.parent;
   if (!g || !parent) return;
+  parent.helped = true;
   goTo(parent);
   const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
   better = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
@@ -820,6 +820,7 @@ function renderBoard() {
   if (sh.territory && an && mode === 'play') s.ownership = an.ownership;
   if (scoring) { s.dead = scoring.dead; if (!scoring.pending) s.scoreOwner = game.score(scoring.dead, node).owner; }
   const hintsVisible = hintsShown(node);
+  if (hintsVisible) node.helped = true; // the best moves were on show here: a good move isn't "found" alone
   if (hintsVisible) {
     s.hints = hintList(an);
     const m = hoverPt !== null && an.moves.find(x => x.move === hoverPt);
@@ -1143,7 +1144,7 @@ function load() {
     if (!['katago', 'builtin'].includes(settings.coachEngine)) settings.coachEngine = DEFAULTS.coachEngine;
     settings.gradeAI = !!settings.gradeAI;
     settings.findYourself = !!settings.findYourself;
-    if (![BLACK, WHITE].includes(settings.lastHuman)) settings.lastHuman = DEFAULTS.lastHuman;
+    if (![0, BLACK, WHITE].includes(settings.lastHuman)) settings.lastHuman = DEFAULTS.lastHuman;
     settings.studyFromImport = !!settings.studyFromImport;
     settings.speak = !!settings.speak;
     if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
@@ -1190,7 +1191,7 @@ function importSGF(text) {
     cancelAI();
     stopCoach();
     game = g;
-    if (settings.human) settings.lastHuman = settings.human;
+    settings.lastHuman = settings.human;
     settings.human = 0;
     settings.studyFromImport = true;
     mode = 'play'; scoring = null; resigned = 0; better = null;
@@ -1301,7 +1302,6 @@ function setupControls() {
   $('#btnUndo').onclick = takeBack;
   $('#btnHint').onclick = () => {
     hintOn = !hintOn;
-    if (hintOn) game.current.helped = true; // seeing the hint means a good move here wasn't found alone
     const an = game.current.analysis;
     if (hintOn && !an) flash('The coach is still reading this position…');
     render();

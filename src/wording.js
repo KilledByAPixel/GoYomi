@@ -254,7 +254,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'initiative':
-        if (!f.sente && !B) out.push(S ? `Gote: ${other(opp, ctx)} can play elsewhere.` : `${cap(w.subj(opp))} can play elsewhere without answering (gote).`);
+        if (!f.sente && !B) out.push(S ? `Gote: ${w.subj(opp)} can play elsewhere.` :`${cap(w.subj(opp))} can play elsewhere without answering (gote).`);
         else if (f.sente && !purpose && level === 'improving') {
           out.push(`${cap(w.subj(opp))} ${w.verb(opp, 'have', 'has')} to answer, so ${w.subj(mover)} ${w.verb(mover, 'keep', 'keeps')} the initiative (sente).`);
         }
@@ -272,7 +272,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'otherwise':
-        if (!B) out.push(S ? `Otherwise ${other(opp, ctx)} plays ${ptName(f.move)}.` : `Otherwise ${w.subj(opp)} would play ${ptName(f.move)}.`);
+        if (!B) out.push(S ? `Otherwise ${w.subj(opp)} ${w.verb(opp, 'play', 'plays')} ${ptName(f.move)}.` :`Otherwise ${w.subj(opp)} would play ${ptName(f.move)}.`);
         break;
     }
   }

@@ -249,3 +249,10 @@ test('the coach calls the opponent "the AI" in games against it, and uses colour
   assert.doesNotMatch(vsAI, /White/);
   assert.match(describe(atari, { level: 'beginner', mover: BLACK, you: 0 }).join(' '), /White's stone at A1/, 'study mode keeps colours');
 });
+
+test('strong wording names the right side when the AI\'s own move is described', () => {
+  const facts = [{ type: 'initiative', sente: false }, { type: 'otherwise', move: P('C3') }];
+  assert.deepEqual(describe(facts, { level: 'strong', mover: WHITE, you: BLACK }), ['Gote: you can play elsewhere.', 'Otherwise you play C3.']);
+  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: BLACK }), ['Gote: the AI can play elsewhere.', 'Otherwise the AI plays C3.']);
+  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: 0 }), ['Gote: White can play elsewhere.', 'Otherwise White plays C3.']);
+});
