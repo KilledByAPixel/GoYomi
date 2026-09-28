@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, LEVEL_BATCH, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName } from './wording.js';
 import { BoardView } from './view.js';
@@ -50,6 +50,7 @@ let resigned = 0;            // colour that resigned
 let hoverPt = null;
 let hoverByKey = false;      // hoverPt is the keyboard cursor, whose readout already says why a point can't be played
 let hintOn = false;
+let passWarned = null;       // the position whose too-early pass was warned about: Pass now reads "Pass anyway"
 let better = null;           // { node, move, pv } — coach move shown on node's board
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
@@ -251,6 +252,15 @@ function onHover(p, byKey = false) {
 function humanPass() {
   if (mode !== 'play' || aiNode || game.isOver() || resigned) return;
   if (aiColor() && !resigned && game.toPlay === aiColor()) return;
+  // Clearly too early (plenty still undecided): warn once; Pass again passes.
+  const node = game.current;
+  const early = settings.coach && node.analysisDone && passWarned !== node ? earlyPass(node.board, node.analysis) : null;
+  if (early) {
+    passWarned = node;
+    flash(`Too early to pass: about ${early.undecided} points are still undecided, for example around the ${regionName(early.move, coachLevel())}. Press Pass again to pass anyway.`);
+    render();
+    return;
+  }
   playMove(PASS, { human: true, news: `${who(game.toPlay)} passed.` });
 }
 
@@ -994,6 +1004,7 @@ function renderNav() {
   $('[data-nav=next]').disabled = $('[data-nav=last]').disabled = !node.children.length;
   const humanTurn = mode === 'play' && !aiNode && !game.isOver() && !resigned && !(aiColor() && game.toPlay === aiColor());
   $('#btnPass').disabled = !humanTurn;
+  $('#btnPass').textContent = humanTurn && passWarned === node ? 'Pass anyway' : 'Pass';
   $('#btnUndo').disabled = !node.parent && !resigned;
   $('#btnAI').disabled = !!aiNode || mode !== 'play' || game.isOver() || !!resigned;
   $('#btnResign').textContent = game.isOver() ? 'Count' : 'Resign';
