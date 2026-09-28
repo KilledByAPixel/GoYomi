@@ -4,15 +4,17 @@
 import { BLACK, WHITE, PASS, POINTS, ptName } from './board.js';
 
 // Every level plays with KataGo (`kata`: see chooseKataMove), weaker ones by
-// reading less and choosing among its instincts more randomly. The built-in
-// fields (playouts, temp, blunder) are the fallback where KataGo can't run.
+// reading less and choosing among its instincts more randomly. Calibrated in
+// self-play (tools/levels.js): each level beat the one below about 3 games in
+// 4. The built-in fields (playouts, temp, blunder) are the fallback where
+// KataGo can't run.
 export const LEVELS = [
   { name: 'Pebble', blurb: 'Just learned the rules. Misses captures: practise capturing.', playouts: 50, temp: 1, blunder: 0.3, kata: { visits: 1, temp: 1.5, floor: 0.002, miss: 0.25 } },
   { name: 'Seedling', blurb: 'Plays sensible-looking moves, but misses a lot.', playouts: 220, temp: 1.2, blunder: 0.14, kata: { visits: 1, temp: 1.2, floor: 0.005, miss: 0.12 } },
-  { name: 'Sprout', blurb: 'Knows the basics, still leaves weaknesses.', playouts: 400, temp: 1.5, blunder: 0.1, kata: { visits: 1, temp: 1, floor: 0.01, miss: 0.05 } },
-  { name: 'Reed', blurb: 'Fights back and punishes obvious mistakes.', playouts: 650, temp: 1.8, blunder: 0.08, kata: { visits: 1, temp: 0.7, floor: 0.02 } },
-  { name: 'Stream', blurb: 'A casual club player.', playouts: 2000, temp: 3, blunder: 0.03, kata: { visits: 4, temp: 0.6, floor: 0.05 } },
-  { name: 'River', blurb: 'A solid club player.', playouts: 5000, temp: 5, blunder: 0, kata: { visits: 16, temp: 0.4, floor: 0.1 } },
+  { name: 'Sprout', blurb: 'Knows the basics, still leaves weaknesses.', playouts: 400, temp: 1.5, blunder: 0.1, kata: { visits: 1, temp: 0.9, floor: 0.01, miss: 0.03 } },
+  { name: 'Reed', blurb: 'Fights back and punishes obvious mistakes.', playouts: 650, temp: 1.8, blunder: 0.08, kata: { visits: 1, temp: 0.45, floor: 0.05 } },
+  { name: 'Stream', blurb: 'Plays good shape on instinct, but doesn\'t read ahead.', playouts: 2000, temp: 3, blunder: 0.03, kata: { visits: 1, temp: 0.3, floor: 0.1 } },
+  { name: 'River', blurb: 'Reads a few moves ahead. Punishes loose play.', playouts: 5000, temp: 5, blunder: 0, kata: { visits: 12, temp: 0 } },
   { name: 'Mountain', blurb: 'Strong. Reads fights well.', playouts: 16000, temp: 0, blunder: 0, kata: { visits: 48, temp: 0.2, floor: 0.2 } },
   { name: 'Dragon', blurb: 'Very strong, and still quick.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 128, temp: 0 } },
   { name: 'Phoenix', blurb: 'Extra hard: KataGo thinking longer. For when Dragon isn\'t enough.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 600, temp: 0 }, maxTime: 10000 },
