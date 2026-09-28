@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 import { PASS, parsePt, ptName } from '../src/board.js';
 import { LEVELS, chooseKataMove, shouldPass } from '../src/coach.js';
 import { Game } from '../src/game.js';
+import { Evaluator } from '../src/katago/evaluator.js';
+import { loadNet } from '../tools/katago-node.js';
+import { levelMove } from '../tools/play-level.js';
 
 const P = parsePt;
 // A seeded random stream, so draws are repeatable.
@@ -70,4 +73,24 @@ test('LEVELS: nine levels on KataGo, Dragon at 128 visits, Phoenix thinking long
   assert.ok(phoenix.kata.visits > 128 && phoenix.maxTime === 10000);
   assert.equal(phoenix.playouts, dragon.playouts, 'Phoenix falls back to built-in Dragon');
   for (let i = 1; i < LEVELS.length; i++) assert.ok(LEVELS[i].kata.visits >= LEVELS[i - 1].kata.visits, 'stronger levels read at least as much');
+});
+
+test('levelMove plays a legal move for a KataGo level and for its built-in fallback', async () => {
+  const evaluator = new Evaluator((await loadNet()).net);
+  const game = new Game({ komi: 7 });
+  for (const lv of [LEVELS[0], LEVELS[5]]) {
+    const { move, results } = await levelMove(game, lv, { engine: 'katago', evaluator });
+    assert.ok(game.check(move).ok, `${lv.name}: ${ptName(move)}`);
+    assert.ok(results.policy.length > 1, 'a KataGo read carries the instinct for every move');
+  }
+  const { move } = await levelMove(game, LEVELS[0], { engine: 'builtin' });
+  assert.ok(game.check(move).ok);
+});
+
+test('two Pebbles finish a game by passing', async () => {
+  const evaluator = new Evaluator((await loadNet()).net);
+  const rand = seeded(11), game = new Game({ komi: 7 });
+  while (!game.isOver() && game.current.depth < 200) game.play((await levelMove(game, LEVELS[0], { engine: 'katago', evaluator, rand })).move);
+  assert.ok(game.isOver(), `still playing after ${game.current.depth} moves`);
+  assert.ok(game.current.depth > 30, `passed too early (${game.current.depth} moves)`);
 });

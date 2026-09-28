@@ -3,7 +3,8 @@
 //   node tools/gnugo-match.js --gnugo path/to/gnugo.exe --level 8 --gnulevel 10 --games 20 --jobs 4
 //   node tools/gnugo-match.js --katago path/to/katago.exe --model net.bin.gz --visits 50 --games 20 --jobs 4
 //
-// --level     GoYomi AI level, 1 (Pebble) to 9 (Phoenix, KataGo) default 8
+// --level     GoYomi AI level, 1 (Pebble) to 9 (Phoenix)          default 8
+// --engine    how GoYomi's level plays: katago or builtin (its fallback) default katago
 // --gnulevel  GNU Go strength, 0 to 10 (10 is its strongest)    default 10
 // --katago    play KataGo instead of GNU Go (path to katago.exe)
 // --model     KataGo network file (required with --katago)
@@ -28,17 +29,17 @@ import { resolve, dirname, join } from 'node:path';
 import { BLACK, WHITE, PASS, ptName, parsePt } from '../src/board.js';
 import { Search, seed } from '../src/mcts.js';
 import { Game } from '../src/game.js';
-import { LEVELS, chooseMove, shouldPass, estimateDead } from '../src/coach.js';
-import { buildPosition } from '../src/recipe.js';
-import { KataSearch } from '../src/katago/search.js';
+import { LEVELS, estimateDead } from '../src/coach.js';
 import { Evaluator } from '../src/katago/evaluator.js';
 import { loadNet } from './katago-node.js';
+import { levelMove } from './play-level.js';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const opts = {
   // An absolute path: Cygwin builds of GNU Go re-launch themselves by the path given and fail on a relative one.
   gnugo: arg('gnugo') ? resolve(arg('gnugo')) : 'gnugo',
   level: +arg('level', 8) - 1,
+  engine: arg('engine', 'katago'),
   gnulevel: +arg('gnulevel', 10),
   katago: arg('katago') ? resolve(arg('katago')) : null,
   model: arg('model') ? resolve(arg('model')) : null,
@@ -101,6 +102,10 @@ class Gtp {
 
 const gtpColor = c => (c === BLACK ? 'black' : 'white');
 
+// One network per process, loaded on first use.
+let evaluatorOnce = null;
+const sharedEvaluator = async () => evaluatorOnce || (evaluatorOnce = new Evaluator((await loadNet()).net));
+
 async function playGame(index) {
   const ours = index % 2 === 0 ? BLACK : WHITE; // alternate colours
   const lv = LEVELS[opts.level];
@@ -124,32 +129,9 @@ async function playGame(index) {
   while (!game.isOver() && game.current.depth < opts.maxMoves) {
     const c = game.toPlay;
     let move;
-    if (c === ours && lv.katago) {
-      // KataGo's level: its reads are deep enough to decide about passing too.
-      const evaluator = new Evaluator((await loadNet()).net);
-      const s = new KataSearch(buildPosition(game.recipe()), { komi: opts.komi, evaluator, batch: 4 });
-      await s.run(lv.visits);
-      const r = s.results(60);
-      move = shouldPass(game, r, c) ? PASS : chooseMove(r, lv);
-      if (move !== PASS && !game.check(move).ok) {
-        move = r.allMoves.map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
-      }
-      await gnu.send(`play ${gtpColor(c)} ${ptName(move)}`);
-    } else if (c === ours) {
-      const s = new Search(game.board, { komi: opts.komi, forbidden: p => !game.check(p).ok });
-      s.run(lv.playouts);
-      let r = s.results(60);
-      // As in the app: after the opponent passes, decide with at least 4000 playouts.
-      let passInfo = r;
-      if (game.board.lastMove === PASS && game.current.parent && r.playouts < 4000) {
-        const s2 = new Search(game.board, { komi: opts.komi, forbidden: p => !game.check(p).ok });
-        s2.run(4000);
-        passInfo = s2.results(60);
-      }
-      move = shouldPass(game, passInfo, c) ? PASS : chooseMove(r, lv);
-      if (move !== PASS && !game.check(move).ok) {
-        move = (r.allMoves || r.moves).map(m => m.move).find(m => m !== PASS && game.check(m).ok) ?? PASS;
-      }
+    if (c === ours) {
+      const evaluator = opts.engine === 'katago' ? await sharedEvaluator() : null;
+      ({ move } = await levelMove(game, lv, { engine: opts.engine, evaluator, komi: opts.komi }));
       await gnu.send(`play ${gtpColor(c)} ${ptName(move)}`);
     } else {
       const reply = (await gnu.send(`genmove ${gtpColor(c)}`)).toUpperCase();
