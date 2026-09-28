@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer } from '../src/wording.js';
 import { Game } from '../src/game.js';
 
 const P = parsePt;
@@ -234,4 +234,10 @@ test('hintReason: a tactical point in words, nothing for plain shape', () => {
   assert.match(hintReason(g.board, P('B1'), { level: 'beginner', you: BLACK }), /^B1: Captures 1 stone/);
   const empty = new Game();
   assert.equal(hintReason(empty.board, P('E5'), { level: 'beginner', you: BLACK }), null);
+});
+
+test('hideAnswer: drops lines that name the answer (or a mirror image of it), keeps the rest', () => {
+  const lines = ['Leaves <b>2 stones</b> in atari.', 'Otherwise White would play <b>D7</b>.', 'After F3 it reduces the lower side.', 'Claims the D-file? No: D70 is not a point.'];
+  assert.deepEqual(hideAnswer(lines, [P('D7')]), ['Leaves <b>2 stones</b> in atari.', 'After F3 it reduces the lower side.', 'Claims the D-file? No: D70 is not a point.']);
+  assert.deepEqual(hideAnswer(lines, [P('C3'), P('F3')]), ['Leaves <b>2 stones</b> in atari.', 'Otherwise White would play <b>D7</b>.', 'Claims the D-file? No: D70 is not a point.']);
 });

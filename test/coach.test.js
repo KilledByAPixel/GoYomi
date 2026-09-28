@@ -273,3 +273,14 @@ test('earlyPass: open points left means too early; a pass-first read or a settle
   assert.equal(earlyPass(g.board, settled), null, 'fewer than 4 undecided');
   assert.equal(earlyPass(g.board, null), null, 'no read');
 });
+
+test('earlyPass: a read that has only just started still warns, pointing at the most unsettled area', () => {
+  const g = new Game();
+  g.play(parsePt('E5'));
+  // Nothing searched yet; only the lower-right area is unsettled.
+  const own = new Array(81).fill(0.9);
+  for (const n of ['G1', 'H1', 'J1', 'G2', 'H2', 'J2']) own[POINTS.indexOf(parsePt(n))] = 0;
+  const e = earlyPass(g.board, { moves: [], ownership: own });
+  assert.equal(e.undecided, 6);
+  assert.ok(['G1', 'H1', 'J1', 'G2', 'H2', 'J2'].map(parsePt).includes(e.move), 'a point in that area');
+});

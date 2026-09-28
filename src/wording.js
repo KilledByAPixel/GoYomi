@@ -105,6 +105,13 @@ export function ignoreNote(board, aiMove, an, level) {
   return `You don't need to answer this directly. The biggest move now is around the ${regionName(top.move, level)}.`;
 }
 
+// Find it yourself: the explanation lines minus any that would give the answer
+// away, i.e. that name one of `points` ("Otherwise White would play D7").
+export function hideAnswer(lines, points) {
+  const names = points.map(p => new RegExp(`\\b${ptName(p)}\\b`));
+  return lines.filter(t => !names.some(re => re.test(t)));
+}
+
 // Why a hinted move is worth playing, when it has a tactical point: captures,
 // saves, ataris, connects or cuts. Null for plain shape, which says little.
 const HINT_FACTS = new Set(['capture', 'rescue', 'atari', 'connect', 'separates']);

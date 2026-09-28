@@ -5,7 +5,7 @@ import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
 import { LEVELS, LEVEL_BATCH, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
-import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName } from './wording.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer } from './wording.js';
 import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
@@ -188,6 +188,7 @@ function pvStones(color, moves) {
 // ------------------------------------------------------------------ game flow
 
 function newGame() {
+  passWarned = null; // any change of position ends a pass warning
   cancelAI();
   stopCoach();
   game = new Game({ komi: settings.komi, handicap: settings.handicap });
@@ -207,6 +208,7 @@ function afterChange() {
 // human: the player's own move, which cuts off anything still being spoken.
 // news: shown and said in place of the usual move announcement (passes).
 function playMove(move, { human = false, news = '' } = {}) {
+  passWarned = null; // any change of position ends a pass warning
   const parent = game.current;
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
@@ -255,7 +257,8 @@ function humanPass() {
   if (aiColor() && !resigned && game.toPlay === aiColor()) return;
   // Clearly too early (plenty still undecided): warn once; Pass again passes.
   const node = game.current;
-  const early = settings.coach && node.analysisDone && passWarned !== node ? earlyPass(node.board, node.analysis) : null;
+  // The coach's read so far is enough: a quick pass right after the AI's move is the one to catch.
+  const early = settings.coach && node.analysis && passWarned !== node ? earlyPass(node.board, node.analysis) : null;
   if (early) {
     passWarned = node;
     flash(`Too early to pass: about ${early.undecided} points are still undecided, for example around the ${regionName(early.move, coachLevel())}. Press Pass again to pass anyway.`);
@@ -266,6 +269,7 @@ function humanPass() {
 }
 
 function takeBack() {
+  passWarned = null; // any change of position ends a pass warning
   // Nothing to take back at the start: leave the AI's first move alone.
   if (!game.current.parent && !resigned) return;
   if (mode === 'score') exitScoring();
@@ -557,7 +561,8 @@ function announceGrade(node) {
   if (node.announced || node.move === PASS || !settings.show.feedback || (node !== cur && node !== cur.parent)) return;
   node.announced = true;
   const level = coachLevel(), facts = factsFor(node), shown = levelGrade(node.grade, level, facts);
-  const lines = describe(facts, { level, mover: node.color, you: settings.human, shown });
+  const all = describe(facts, { level, mover: node.color, you: settings.human, shown });
+  const lines = puzzle(node, shown) ? hideAnswer(all, answerPoints(node)) : all;
   const said = puzzle(node, shown) ? 'There was something better here. Can you find it?'
     : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}`;
   announce(plainText(`Coach: ${shown.label}. ${said} ${lines.join(' ')}`));
@@ -647,6 +652,7 @@ function resumeFromScoring() {
 // ------------------------------------------------------------------ navigation
 
 function goTo(node) {
+  passWarned = null; // any change of position ends a pass warning
   cancelAI();
   if (mode === 'score') exitScoring();
   better = null; hintOn = false;
@@ -929,6 +935,11 @@ function ignoreLine(node) {
 const puzzle = (node, shown) => settings.findYourself && !!settings.human && node.color === settings.human
   && !node.revealed && (shown.key === 'mistake' || shown.key === 'blunder');
 // A Good or Best move played from a position the player went back to with Try again.
+// The coach's move for node and its mirror images: what a puzzle mustn't name.
+function answerPoints(node) {
+  const g = node.grade, e = node.parent.analysis && entryFor(node.parent.analysis, g.bestMove);
+  return [g.bestMove, ...((e && e.twins) || [])].filter(q => q !== PASS);
+}
 const found = (node, shown) => !!(node.parent && node.parent.retry) && (shown.key === 'best' || shown.key === 'good');
 
 function retry(node) {
@@ -970,7 +981,8 @@ function moveEntry(node) {
         `<button data-act="try" data-id="${node.id}" data-pt="${g.bestMove}">Try ${ptName(g.bestMove)} instead</button></div>`;
     }
   }
-  const lines = describe(facts, ctx);
+  const all = describe(facts, ctx);
+  const lines = g && ctx.shown && puzzle(node, ctx.shown) ? hideAnswer(all, answerPoints(node)) : all;
   if (settings.coach && !(node.reads && node.reads.threat && node.reads.baseline)) lines.push('<span class="muted">Reading the idea behind this move…</span>');
   return wrap(html + list(lines));
 }

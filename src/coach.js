@@ -2,6 +2,7 @@
 // move choice, when to pass, dead stones, move grading and plain-language
 // explanations. Pure functions — no DOM, testable in node.
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
+import { regionOf } from './explain.js';
 
 // Every level plays with KataGo (`kata`: see chooseKataMove), weaker ones by
 // reading less and choosing among its instincts more randomly. Calibrated in
@@ -120,13 +121,18 @@ export function shouldPass(game, results, aiColor) {
 
 // Is passing now clearly too early for the side to move? When the read's best
 // move isn't a pass and at least `min` empty points are still undecided
-// (ownership between -0.5 and 0.5). Returns the count and the best move.
+// (ownership between -0.5 and 0.5). Returns the count and a move to point at:
+// the best move, or, while a read has only just started and has none yet, a
+// point in the area with the most undecided points.
 export function earlyPass(board, an, min = 4) {
   const top = an && an.moves && an.moves[0];
-  if (!top || top.move === PASS || !an.ownership) return null;
-  let undecided = 0;
-  for (let i = 0; i < POINTS.length; i++) if (board.color[POINTS[i]] === EMPTY && Math.abs(an.ownership[i]) < 0.5) undecided++;
-  return undecided >= min ? { undecided, move: top.move } : null;
+  if (!an || !an.ownership || (top && top.move === PASS)) return null;
+  const open = POINTS.filter((p, i) => board.color[p] === EMPTY && Math.abs(an.ownership[i]) < 0.5);
+  if (open.length < min) return null;
+  if (top) return { undecided: open.length, move: top.move };
+  const inRegion = r => open.filter(p => regionOf(p) === r);
+  const busiest = [...Array(9).keys()].reduce((a, r) => inRegion(r).length > inRegion(a).length ? r : a, 0);
+  return { undecided: open.length, move: inRegion(busiest)[0] };
 }
 
 // Winrate / score of the best move in a finished analysis, for the side to move.
