@@ -53,6 +53,7 @@ let resigned = 0;            // colour that resigned
 let hoverPt = null;
 let hoverByKey = false;      // hoverPt is the keyboard cursor, whose readout already says why a point can't be played
 let hintOn = false;
+let warningsSaid = null;     // the position and atari warnings last read out
 let passWarned = null;       // the position whose too-early pass was warned about: Pass now reads "Pass anyway"
 let better = null;           // { node, move, pv } — coach move shown on node's board
 let flashMsg = null, flashTimer = 0;
@@ -902,6 +903,13 @@ function renderCoach() {
       .map(w => `<li class="${w.kind}">${w.text}</li>`).join('');
   }
   setHTML($('#warnings'), linkPoints(warn));
+  // Screen readers and speech hear the warnings too: once when they appear for a
+  // position (redraws don't repeat them), and again on coming back to it.
+  const warnKey = warn && `${node.id}|${warn}`;
+  if (warnKey !== warningsSaid) {
+    warningsSaid = warnKey;
+    if (warn) announce(plainText(warn.replace(/<\/li>/g, ' </li>')));
+  }
 
   const tb = $('#threatBox');
   tb.hidden = !(threat && threat.node === node);
