@@ -18,13 +18,19 @@ happened, and shows you what it would have played.
   network right in your browser. Set **Coach explains for** to
   match your experience: beginners hear about liberties and captures,
   stronger players about points, threats and plans. **Show** puts the
-  coach's move on the board; **Try it instead** plays it for you.
-- **Play by keyboard or by ear.** Tab to the board and play with the arrow
-  keys and Enter. Screen readers hear every move and the coach's comments,
+  coach's move on the board; **Try it instead** plays it for you. It tells
+  you when the AI's move doesn't need an answer, and warns you before you
+  pass too early. Turn on **Find better moves yourself** to get another try
+  after a mistake before the coach shows its move.
+- **Accessible: play by keyboard or by ear.** GoYomi is built to be played
+  without a mouse or without seeing the board. Tab to the board and play
+  with the arrow keys and Enter; every point you move to is described.
+  Screen readers hear every move, the coach's comments, hints and warnings,
   or turn on **Speak announcements** to have them read aloud. Hover any
   point the coach mentions to see where it is on the board.
-- **Hints when you want them.** Ask for the best moves, or press **Their
-  idea** to see what your opponent is planning and what ignoring it costs.
+- **Hints when you want them.** Ask for the best moves and why the top one
+  matters, or press **Their idea** to see what your opponent is planning and
+  what ignoring it costs.
 - **See the board like a stronger player.** Overlays for liberties, atari
   alerts, territory, move preview and move numbers.
 - **Take back freely.** Undo any move, try something else, and switch between
