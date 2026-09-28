@@ -5,7 +5,7 @@ import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
 import { LEVELS, LEVEL_BATCH, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
-import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName } from './wording.js';
 import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
@@ -746,6 +746,24 @@ function hoverInfo() {
   return info;
 }
 
+// Whether the coach's best moves are on the board for this position.
+function hintsShown(node) {
+  const an = node.analysis;
+  return mode === 'play' && !!an && (hintOn || settings.show.hints) && !game.isOver(node)
+    && !(aiColor() && !resigned && node.board.toPlay === aiColor() && node.children.length === 0);
+}
+
+// Why the top hint is worth playing, when it has a tactical point (cached per move).
+function hintWhy(node) {
+  if (!hintsShown(node)) return null;
+  const top = node.analysis.moves.find(m => m.move !== PASS);
+  if (!top) return null;
+  if (!node.hintWhy || node.hintWhy.move !== top.move) {
+    node.hintWhy = { move: top.move, text: hintReason(node.board, top.move, { level: coachLevel(), you: settings.human }) };
+  }
+  return node.hintWhy.text;
+}
+
 function renderBoard() {
   const node = game.current, b = node.board, an = node.analysis, sh = settings.show;
   const s = {
@@ -758,7 +776,7 @@ function renderBoard() {
   if (sh.atari && mode === 'play') s.threats = threats(b).filter(t => t.libs.length === 1);
   if (sh.territory && an && mode === 'play') s.ownership = an.ownership;
   if (scoring) { s.dead = scoring.dead; if (!scoring.pending) s.scoreOwner = game.score(scoring.dead, node).owner; }
-  const hintsVisible = mode === 'play' && an && (hintOn || sh.hints) && !game.isOver(node) && !(aiColor() && !resigned && b.toPlay === aiColor() && node.children.length === 0);
+  const hintsVisible = hintsShown(node);
   if (hintsVisible) {
     s.hints = hintList(an);
     const m = hoverPt !== null && an.moves.find(x => x.move === hoverPt);
@@ -822,6 +840,9 @@ function renderCoach() {
     if (act === 'show') showBetter(target);
     if (act === 'try') tryInstead(target);
   };
+  const why = hintWhy(node);
+  $('#hintWhy').hidden = !why;
+  setHTML($('#hintWhy'), why ? linkPoints(why) : '');
 
   // Live warnings about the position on the board.
   const b = node.board;
@@ -881,6 +902,13 @@ function renderReview() {
   };
 }
 
+// Under the AI's latest move: "you don't need to answer this", once the coach
+// has read the player's position (games against the AI only).
+function ignoreLine(node) {
+  if (!settings.human || !settings.coach || node.color === settings.human || node !== game.current || !node.analysisDone) return null;
+  return ignoreNote(node.board, node.move, node.analysis, coachLevel());
+}
+
 function moveEntry(node) {
   const latest = node === game.current;
   const head = pill => `<div class="fb-head">${pill}<span><b>${who(node.color)}</b> ${node.move === PASS ? 'passed' : `played <b>${ptName(node.move)}</b>`}</span></div>`;
@@ -890,7 +918,10 @@ function moveEntry(node) {
   const level = coachLevel(), facts = factsFor(node);
   const ctx = { level, mover: node.color, you: settings.human };
   // Ungraded (AI) moves: just what the player has to react to.
-  if (!isGraded(node)) return wrap(head('') + list(describeNote(facts, ctx)));
+  if (!isGraded(node)) {
+    const notes = describeNote(facts, ctx), ignore = ignoreLine(node);
+    return wrap(head('') + list(ignore ? [...notes, ignore] : notes));
+  }
   const g = node.grade;
   let html;
   if (!settings.show.feedback) html = head('');
@@ -1191,7 +1222,8 @@ function setupControls() {
     // Screen readers and speech hear the hints too (mirror images named once).
     if (hintOn && an) {
       const names = [...new Map(hintList(an).map(h => [h.rank, ptName(h.move)])).values()];
-      announce(names.length ? `Best moves: ${names[0]} (best)${names.length > 1 ? ', then ' + names.slice(1).join(', ') : ''}.` : 'No hints here.');
+      const why = hintWhy(game.current);
+      announce((names.length ? `Best moves: ${names[0]} (best)${names.length > 1 ? ', then ' + names.slice(1).join(', ') : ''}.` : 'No hints here.') + (why ? ` ${plainText(why)}` : ''));
     }
   };
   $('#btnAI').onclick = () => aiMove(true, true);

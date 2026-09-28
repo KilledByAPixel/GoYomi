@@ -139,6 +139,7 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 
 .feedback p { margin: 6px 0; }
 .feedback .tip { color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); padding: 8px 10px; border-radius: 8px; }
+.hint-why { margin: 8px 0 0; font-size: 14px; }
 .fb-entry { padding: 8px 0; }
 .fb-entry + .fb-entry { border-top: 1px solid var(--line); }
 .fb-entry:not(.latest) { opacity: .8; }
