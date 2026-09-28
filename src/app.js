@@ -308,6 +308,8 @@ function resignOrScore() {
   if (resigned) return;
   cancelAI();
   resigned = settings.human;
+  // The coach's moves show once you've resigned: taking it back doesn't hide them again.
+  for (const n of game.line()) if (n.grade && n.color === settings.human) { n.revealed = true; n.parent.helped = true; }
   playSound('lose');
   flash('You resigned. No shame in that — step back through the game to see where it turned.');
   afterChange();
@@ -669,7 +671,9 @@ function resumeFromScoring() {
 
 // ------------------------------------------------------------------ navigation
 
-function goTo(node) {
+// verdict: also say the coach's verdict on the move landed on (stepping
+// through a game); buttons that step back to act from there skip it.
+function goTo(node, { verdict: sayVerdict = true } = {}) {
   passWarned = null; // any change of position ends a pass warning
   cancelAI();
   if (mode === 'score') exitScoring();
@@ -678,7 +682,7 @@ function goTo(node) {
   game.goTo(node);
   save(); render(); scheduleCoach();
   // Stepping through a game: the move, and the coach's verdict on it when there is one.
-  const graded = node.move !== PASS && node.grade && isGraded(node) && settings.show.feedback;
+  const graded = sayVerdict && node.move !== PASS && node.grade && isGraded(node) && settings.show.feedback;
   announce(positionPhrase(node.depth, node.color, node.move) + (graded ? ` ${gradeSpeech(node)}` : ''));
   aiMove(); // back at the newest position with the AI to move (only fires on a leaf)
 }
@@ -695,7 +699,7 @@ function showBetter(node) {
   const g = node.grade, parent = node.parent;
   if (!g || !parent) return;
   parent.helped = true;
-  goTo(parent);
+  goTo(parent, { verdict: false });
   const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
   better = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
   const canClick = !resigned && (!aiColor() || parent.board.toPlay !== aiColor());
@@ -708,7 +712,7 @@ function tryInstead(node) {
   if (!g || !node.parent) return;
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   node.parent.helped = true;
-  goTo(node.parent);
+  goTo(node.parent, { verdict: false });
   playMove(g.bestMove, { human: true });
 }
 
@@ -971,7 +975,7 @@ const found = (node, shown) => !!(node.parent && node.parent.retry && !node.pare
 
 function retry(node) {
   node.parent.retry = true;
-  goTo(node.parent);
+  goTo(node.parent, { verdict: false });
 }
 
 function reveal(node) {
