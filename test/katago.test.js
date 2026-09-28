@@ -143,3 +143,21 @@ test('results include the network\'s instinct for every legal move', async () =>
   assert.ok(Math.abs(r.policy.reduce((t, m) => t + m.prior, 0) - 1) < 1e-4, 'priors sum to 1');
   assert.ok(r.policy.length > r.allMoves.length, 'more than the moves the search visited');
 });
+
+test('a fixed batch pads every run to one size and gives the same results', async () => {
+  const { net } = await loadNet();
+  const run = async fixed => {
+    net.fixedBatch = fixed;
+    const sizes = new Set(), forward = net.forward;
+    net.forward = (s, g) => { sizes.add(s.shape[0]); return forward.call(net, s, g); };
+    try {
+      const s = new KataSearch(buildPosition({ setup: [], moves: [[parsePt('E5'), BLACK]], whiteFirst: false }), { komi: 7, evaluator: new Evaluator(net, { symmetry: 0, maxBatch: 8, cacheSize: 0 }), batch: 3 });
+      await s.run(10);
+      return { sizes: [...sizes], moves: s.results(5).moves.map(m => [m.move, m.visits, m.winrate.toFixed(4)]) };
+    } finally { net.forward = forward; net.fixedBatch = 0; }
+  };
+  const plain = await run(0), padded = await run(8);
+  assert.ok(plain.sizes.length > 1, `unpadded runs vary in size: ${plain.sizes}`);
+  assert.deepEqual(padded.sizes, [8], 'padded runs are always 8 rows (one GPU program)');
+  assert.deepEqual(padded.moves, plain.moves);
+});

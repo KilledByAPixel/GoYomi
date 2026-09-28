@@ -77,3 +77,13 @@ test('chooseBackend: a slow GPU that worked is kept when the next backend fails'
   assert.deepEqual(disposed, []);
   assert.equal(await chooseBackend(['wasm'], async () => { throw new Error('x'); }), null);
 });
+
+test('Scheduler: a search with its own batch takes no more leaves a round than that', async () => {
+  const sizes = [];
+  const { s } = setup(async ps => { sizes.push(ps.length); return ps.map(() => ({})); });
+  s.evaluator.maxBatch = 16;
+  s.add({ ...job('kopponent', 12, 1), batch: 4 });
+  await idle(s);
+  // A level's move reads as it was calibrated: 12 visits in rounds of 4, not one round of 12.
+  assert.deepEqual(sizes, [4, 4, 4]);
+});

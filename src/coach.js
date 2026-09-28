@@ -20,6 +20,11 @@ export const LEVELS = [
   { name: 'Phoenix', blurb: 'Extra hard: KataGo thinking longer. For when Dragon isn\'t enough.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 600, temp: 0 }, maxTime: 10000 },
 ];
 
+// KataGo positions per round for an AI level's move. Small reads depend on it
+// (12 visits in one round of 16 is 11 moves read once each), so the app and
+// the match tools use the batch the levels were calibrated with.
+export const LEVEL_BATCH = 4;
+
 const sign = c => c === BLACK ? 1 : -1;
 
 // Picks the AI's move from finished search results.

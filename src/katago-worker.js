@@ -35,6 +35,8 @@ async function load(only) {
     await tf.ready();
     const gpu = b === 'webgpu' || b === 'webgl', batch = gpu ? 16 : 4;
     const net = new Net(tf, parsed);
+    // On a GPU every run is one size, so its programs are built once, here in the warm-up.
+    if (gpu) net.fixedBatch = batch;
     try {
       const rate = await benchmark(net, batch);
       return { backend: b, net, rate, batch, gpu, dispose: () => net.dispose() };
@@ -87,6 +89,7 @@ self.onmessage = async e => {
     engine: msg.engine, id: msg.id, priority: msg.priority || 0,
     search: new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch }),
     target: msg.playouts || 100,
+    batch: msg.batch || 0,
     maxTime: msg.maxTime || 60000,
     reportMs: msg.reportMs ?? 250,
     started: performance.now(), lastReport: 0,

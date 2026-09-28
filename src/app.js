@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings } from './wording.js';
 import { BoardView } from './view.js';
@@ -119,7 +119,7 @@ function startKata() {
   kata.host.onFail = message => {
     kata.state = 'failed';
     kata.info = kata.host.info;
-    flash(`KataGo stopped working (${message}), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`);
+    flash(`KataGo stopped working (${message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
     useCoachEngine();
     // A move KataGo was thinking about is played by the built-in engine instead.
     if (aiNode) { cancelAI(); setTimeout(() => aiMove(), 0); }
@@ -131,8 +131,8 @@ function startKata() {
     // Too slow to read positions in a few seconds: the built-in engine coaches better.
     kata.state = info.ok && info.rate >= MIN_RATE ? 'ready' : 'failed';
     if (kata.state === 'failed') {
-      flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`
-        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine (a little weaker, and slower at the top levels).`);
+      flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`
+        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
     }
     useCoachEngine();
   });
@@ -342,7 +342,7 @@ async function aiMove(force = false, best = false) {
   const kind = opponent === builtin.opponent ? 'builtin' : 'katago';
   // Without KataGo each level plays as its built-in namesake (Phoenix as Dragon).
   const onKata = !best && kind === 'katago';
-  const budget = onKata ? { visits: lv.kata.visits } : { playouts: lv.playouts };
+  const budget = onKata ? { visits: lv.kata.visits, batch: LEVEL_BATCH } : { playouts: lv.playouts };
   let results = best && node.analysisDone && kindOf(node.analysis) === kind ? node.analysis
     : await opponent.search(game.recipe(node), { ...budget, maxTime: onKata && lv.maxTime ? lv.maxTime : 15000, reportMs: 0 });
   if (token !== aiToken) return;
@@ -352,7 +352,7 @@ async function aiMove(force = false, best = false) {
   let passInfo = results;
   if (results && node.board.lastMove === PASS && node.parent) {
     if (node.analysisDone && kindOf(node.analysis) === kind && effort(node.analysis) > effort(results)) passInfo = node.analysis;
-    else if (effort(results) < 4000) passInfo = await opponent.search(game.recipe(node), { playouts: 4000, reportMs: 0 });
+    else if (effort(results) < 4000) passInfo = await opponent.search(game.recipe(node), onKata ? { visits: 33, batch: LEVEL_BATCH, reportMs: 0 } : { playouts: 4000, reportMs: 0 });
     if (token !== aiToken) return;
   }
   const wait = 450 - (performance.now() - t0);
@@ -983,7 +983,7 @@ function renderStatus() {
   if (h && !h.ok && !hoverByKey) { text = reasonText(h.reason); kind = 'bad'; }
   else if (flashMsg) { text = flashMsg.text; kind = flashMsg.kind; }
   else if (scoring) text = scoring.pending ? 'Counting…' : 'Click groups to mark them dead or alive.';
-  else if (aiNode) text = aiBest ? 'Finding the best move…' : `${aiLabel()} is thinking…`;
+  else if (aiNode) text = aiBest ? 'Finding the best move…' : kata.state === 'loading' ? `Loading KataGo, the AI's network…` : `${aiLabel()} is thinking…`;
   else if (resigned) text = `${colorName(resigned)} resigned.`;
   else if (game.isOver(node)) text = 'Both players passed. The game is over.';
   else if (!settings.human) text = `${colorName(node.board.toPlay)} to play.`;

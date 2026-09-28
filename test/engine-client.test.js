@@ -114,3 +114,12 @@ test('KataWorker: a start that never finishes times out, and a late answer chang
   assert.equal(host.info.ok, false);
   assert.deepEqual(failures, [], 'a failed start is reported by load(), not as a runtime failure');
 });
+
+test('KataEngine: a search can cap its batch (AI levels read as they were calibrated)', { timeout: 2000 }, async () => {
+  const { host, w } = await startedHost();
+  const eng = new KataEngine('kopponent', host, { priority: 1 });
+  const p = eng.search({}, { visits: 12, batch: 4 });
+  assert.equal(w.sent.batch, 4);
+  eng.cancel();
+  assert.equal(await p, null);
+});

@@ -213,13 +213,14 @@ export class KataEngine {
     host.engines.set(name, this);
   }
 
-  search(position, { playouts = 10000, visits = 0, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
+  // batch: most leaves per round for this search (0: whatever the network batch holds).
+  search(position, { playouts = 10000, visits = 0, batch = 0, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
     this.cancel();
     if (this.host.dead) return Promise.resolve(null);
     const id = this.nextId++;
     return new Promise(resolve => {
       this.pending = { id, resolve, onProgress };
-      this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), maxTime, reportMs, priority: this.priority });
+      this.host.post({ type: 'search', engine: this.name, id, position, playouts: visits || this.host.visits(playouts), batch, maxTime, reportMs, priority: this.priority });
     });
   }
 

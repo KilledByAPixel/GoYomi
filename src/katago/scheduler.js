@@ -12,7 +12,8 @@ export class Scheduler {
     this.turn = 0;
   }
 
-  // job: { engine, id, search, target, maxTime, reportMs, priority, started, lastReport }
+  // job: { engine, id, search, target, maxTime, reportMs, priority, batch?, started, lastReport }
+  // batch caps the job's leaves per round (an AI level reads as it was calibrated).
   add(job) {
     this.jobs.delete(job.engine);
     if (this.broken) { this.post({ type: 'done', engine: job.engine, id: job.id, results: null }); return; }
@@ -38,7 +39,7 @@ export class Scheduler {
           live = [...live.slice(s), ...live.slice(0, s)].slice(0, cap);
         }
         const share = Math.max(1, Math.floor(cap / live.length));
-        const parts = live.map(j => ({ j, sels: j.search.gather(Math.min(share, j.target - j.search.playouts)) }));
+        const parts = live.map(j => ({ j, sels: j.search.gather(Math.min(share, j.batch || cap, j.target - j.search.playouts)) }));
         const all = parts.flatMap(p => p.sels);
         const outs = all.length ? await this.evaluator.evaluate(all.map(s => s.pos)) : [];
         let at = 0;

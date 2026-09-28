@@ -255,10 +255,14 @@ export class Net {
 
   // Runs n positions of inputs; returns raw outputs per position, from the
   // side to move's point of view.
+  // With fixedBatch set (on a GPU), every run is padded to that many rows: the
+  // WebGL backend builds its programs for each batch size it sees, stalling
+  // for seconds each time, and a GPU runs 16 rows about as fast as 4.
   async evaluate(spatial, global, n) {
     const tf = this.tf;
-    const s = tf.tensor4d(spatial.subarray(0, n * AREA * SPATIAL), [n, 9, 9, SPATIAL]);
-    const g = tf.tensor2d(global.subarray(0, n * GLOBAL), [n, GLOBAL]);
+    const rows = Math.max(n, Math.min(this.fixedBatch || 0, spatial.length / (AREA * SPATIAL)));
+    const s = tf.tensor4d(spatial.subarray(0, rows * AREA * SPATIAL), [rows, 9, 9, SPATIAL]);
+    const g = tf.tensor2d(global.subarray(0, rows * GLOBAL), [rows, GLOBAL]);
     let out = null, data;
     // Disposed however the run ends: a failing backend mustn't leak GPU memory too.
     try {

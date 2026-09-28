@@ -3,13 +3,13 @@
 // to pass too uses a deeper read (33 visits, or 4000 playouts), as the app does.
 import { PASS } from '../src/board.js';
 import { Search, rand as mctsRand } from '../src/mcts.js';
-import { chooseMove, chooseKataMove, shouldPass } from '../src/coach.js';
+import { chooseMove, chooseKataMove, shouldPass, LEVEL_BATCH } from '../src/coach.js';
 import { buildPosition } from '../src/recipe.js';
 import { KataSearch } from '../src/katago/search.js';
 
 export async function levelMove(game, lv, { engine = 'katago', evaluator = null, rand = mctsRand, komi = 7 } = {}) {
   const kataRead = async visits => {
-    const s = new KataSearch(buildPosition(game.recipe()), { komi, evaluator, batch: 4 });
+    const s = new KataSearch(buildPosition(game.recipe()), { komi, evaluator, batch: LEVEL_BATCH });
     await s.run(visits);
     return s.results(60);
   };
