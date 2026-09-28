@@ -138,7 +138,7 @@ function startKata() {
     kata.state = info.ok && info.rate >= MIN_RATE ? 'ready' : 'failed';
     if (kata.state === 'failed') {
       flash(info.ok ? `KataGo runs too slowly on this device (${Math.round(info.rate)} positions a second), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`
-        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
+        : `KataGo couldn't start here (${info.message}), so the AI and coach use GoYomi's own engine, which is much weaker and slower. On a slow connection, reloading the page may fix it.`);
     }
     useCoachEngine();
   });
