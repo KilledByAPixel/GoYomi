@@ -1,19 +1,24 @@
-// Builds a self-contained copy of the game into dist/ for static hosts such as
-// itch.io:  node tools/build.js
+// Builds the published game into dist/:  node tools/build.js [--out dir] [--no-zip]
+// GitHub Pages runs this on every push (.github/workflows/pages.yml).
 //
 // No dependencies. The ES modules in src/ are inlined into classic scripts
 // (app.js for the page, engine-worker.js and katago-worker.js for the search
 // workers), so the result does not rely on module workers. The KataGo network
-// and the vendored TensorFlow.js are copied alongside. dist/goyomi.zip is
-// ready to upload.
+// and the vendored TensorFlow.js are copied alongside, and every file is
+// addressed with a stamp of its contents (see "build" below). dist/goyomi.zip
+// is the same thing for hosts that take an upload, such as itch.io.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'src');
-const dist = path.join(root, 'dist');
+// --out <dir>: build somewhere else (tests); --no-zip: skip the ZIP (the website doesn't need it).
+const arg = k => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
+const dist = path.resolve(arg('--out') || path.join(root, 'dist'));
+const noZip = process.argv.includes('--no-zip');
 
 // ------------------------------------------------------------------ module inliner
 
@@ -140,44 +145,87 @@ function zip(entries) {
 
 // ------------------------------------------------------------------ build
 
+// Every file the page loads is addressed with a stamp of its contents
+// ("app.js?v=3f2a1c9e0b"): a changed file gets a new address, so browsers can't
+// mix a cached old file with new ones; an unchanged file keeps its stamp and
+// its cached copy. Stamps nest: the worker's stamp covers the network and
+// tf.js stamps inside it, app.js covers the workers', the page covers app.js.
+const stamp = buf => createHash('sha256').update(buf).digest('hex').slice(0, 10);
+
 fs.rmSync(dist, { recursive: true, force: true });
-fs.mkdirSync(dist);
+fs.mkdirSync(dist, { recursive: true });
 
 const files = new Map(); // dist name -> Buffer
+for (const f of fs.readdirSync(path.join(root, 'vendor'))) files.set(`vendor/${f}`, fs.readFileSync(path.join(root, 'vendor', f)));
+for (const f of ['b6c96.bin', 'LICENSE.txt']) files.set(`nets/${f}`, fs.readFileSync(path.join(root, 'nets', f)));
+const v = name => `${name.split('/').pop()}?v=${stamp(files.get(name))}`;
 
-// The worker is created by URL; in the bundle it is a plain sibling script.
-files.set('app.js', Buffer.from(bundle(path.join(src, 'app.js'), {
-  'engine-client.js': {
-    "new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' })": "new Worker('engine-worker.js')",
-    "new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' })": "new Worker('katago-worker.js')",
-  },
-})));
-files.set('engine-worker.js', Buffer.from(bundle(path.join(src, 'engine-worker.js'))));
+// tf.js asks for its WebAssembly files by name; it needs an entry for the threaded one we never use.
+const wasm = ['tfjs-backend-wasm.wasm', 'tfjs-backend-wasm-simd.wasm', 'tfjs-backend-wasm-threaded-simd.wasm']
+  .map(f => `'${f}': VENDOR + '${files.has(`vendor/${f}`) ? v(`vendor/${f}`) : f}'`).join(', ');
 files.set('katago-worker.js', Buffer.from(bundle(path.join(src, 'katago-worker.js'), {
   'katago-worker.js': {
     "new URL('../vendor/', import.meta.url)": "new URL('vendor/', self.location.href)",
-    "new URL('../nets/b6c96.bin', import.meta.url)": "new URL('nets/b6c96.bin', self.location.href)",
+    "new URL('../nets/b6c96.bin', import.meta.url)": `new URL('nets/${v('nets/b6c96.bin')}', self.location.href)`,
+    "import(VENDOR + 'tf.js')": `import(VENDOR + '${v('vendor/tf.js')}')`,
+    'tf.setWasmPaths(VENDOR);': `tf.setWasmPaths({ ${wasm} });`,
   },
 })));
-for (const f of fs.readdirSync(path.join(root, 'vendor'))) files.set(`vendor/${f}`, fs.readFileSync(path.join(root, 'vendor', f)));
-for (const f of ['b6c96.bin', 'LICENSE.txt']) files.set(`nets/${f}`, fs.readFileSync(path.join(root, 'nets', f)));
+files.set('engine-worker.js', Buffer.from(bundle(path.join(src, 'engine-worker.js'))));
+// The workers are created by URL; in the bundle they are plain sibling scripts.
+files.set('app.js', Buffer.from(bundle(path.join(src, 'app.js'), {
+  'engine-client.js': {
+    "new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' })": `new Worker('${v('engine-worker.js')}')`,
+    "new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' })": `new Worker('${v('katago-worker.js')}')`,
+  },
+})));
+files.set('style.css', fs.readFileSync(path.join(root, 'style.css')));
+for (const f of ['social.png', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']) files.set(f, fs.readFileSync(path.join(root, f)));
 
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const tag = '<script type="module" src="src/app.js"></script>';
-if (!html.includes(tag)) throw new Error('index.html: script tag not found');
-html = html.replace(tag, '<script defer src="app.js"></script>');
+const swap = (from, to) => {
+  if (!html.includes(from)) throw new Error(`index.html: ${from} not found`);
+  html = html.replace(from, to);
+};
+swap('<link rel="stylesheet" href="style.css">', `<link rel="stylesheet" href="${v('style.css')}">`);
+// The page's version stamps everything it loads. A page kept in the browser's
+// cache (GitHub Pages lets browsers keep files for 10 minutes) can be older than
+// the files on the server: it reloads once to get the new page, then starts.
+const version = stamp(Buffer.from(html + v('app.js')));
+swap('<script type="module" src="src/app.js"></script>', `<meta name="goyomi-version" content="${version}">
+<script>
+(function () {
+  var version = '${version}';
+  function start() {
+    var s = document.createElement('script');
+    s.src = '${v('app.js')}';
+    document.head.appendChild(s);
+  }
+  function startWhenParsed() {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+  }
+  fetch('version.json', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (latest) {
+    var tried = null;
+    try { tried = sessionStorage.getItem('goyomi-reload'); } catch (e) { /* storage blocked */ }
+    if (latest.version !== version && tried !== latest.version) {
+      try { sessionStorage.setItem('goyomi-reload', latest.version); } catch (e) { /* storage blocked */ }
+      location.reload();
+    } else startWhenParsed();
+  }).catch(startWhenParsed);
+})();
+</script>`);
 files.set('index.html', Buffer.from(html));
-files.set('style.css', fs.readFileSync(path.join(root, 'style.css')));
-files.set('LICENSE', fs.readFileSync(path.join(root, 'LICENSE')));
-files.set('THIRD_PARTY_NOTICES.txt', fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.txt')));
+files.set('version.json', Buffer.from(JSON.stringify({ version }) + '\n'));
 
 for (const [name, data] of files) {
   fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
   fs.writeFileSync(path.join(dist, name), data);
 }
-fs.writeFileSync(path.join(dist, 'goyomi.zip'), zip([...files]));
-
 const kb = n => `${(n / 1024).toFixed(1)} KB`;
 for (const [name, data] of files) console.log(`  ${name.padEnd(36)} ${kb(data.length)}`);
-console.log(`  ${'goyomi.zip'.padEnd(36)} ${kb(fs.statSync(path.join(dist, 'goyomi.zip')).size)}`);
-console.log(`Built dist/ (${files.size} files + zip)`);
+if (!noZip) {
+  fs.writeFileSync(path.join(dist, 'goyomi.zip'), zip([...files]));
+  console.log(`  ${'goyomi.zip'.padEnd(36)} ${kb(fs.statSync(path.join(dist, 'goyomi.zip')).size)}`);
+}
+console.log(`Built ${path.relative(root, dist) || dist} (${files.size} files${noZip ? '' : ' + zip'}), version ${version}`);
