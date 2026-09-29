@@ -326,11 +326,19 @@ async function toggleThreat() {
   recipe.moves = [...recipe.moves, [PASS, me]];
   recipe.resetPasses = true; // the imagined pass must not end the game after a real pass
   const mine = threat = { node, pending: true };
+  // Still wanted: not cleared (Esc), not superseded, and still on this position.
+  // An answer for a position the player has left is dropped without a word.
+  const current = () => {
+    if (threat !== mine) return false;
+    if (game.current === node && mode === 'play') return true;
+    threat = null;
+    return false;
+  };
   render();
   await kataSettled();
-  if (threat !== mine) return;
+  if (!current()) return;
   const res = await scout.search(recipe, { playouts: 8000, reportMs: 0 });
-  if (threat !== mine) return; // cleared with Esc, or superseded by a newer request
+  if (!current()) return;
   if (res) preferUsefulMove(res);
   const m = res && res.moves.find(x => x.move !== PASS);
   if (!m) {
