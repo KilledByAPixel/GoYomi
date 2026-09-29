@@ -39,7 +39,7 @@ test('build: the page knows its version and checks for a newer one', () => {
 });
 
 test('build: everything the page needs is there, and no zip when asked not to', () => {
-  for (const f of ['social.png', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'nets/LICENSE.txt', 'vendor/tfjs-backend-wasm.wasm']) assert.ok(existsSync(join(out, f)), f);
+  for (const f of ['social.png', 'icon.png', 'icon-32.png', 'icon-180.png', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'nets/LICENSE.txt', 'vendor/tfjs-backend-wasm.wasm']) assert.ok(existsSync(join(out, f)), f);
   assert.ok(!existsSync(join(out, 'goyomi.zip')));
 });
 
