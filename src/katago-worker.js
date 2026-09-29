@@ -90,9 +90,19 @@ self.onmessage = async e => {
   if (!await loading) { postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null }); return; }
   if (current.get(msg.engine) !== req) return;   // stopped or replaced while loading
   const ev = sched.evaluator;
+  // A position that can't be built (a move onto a stone, say) gets an empty
+  // answer at once: the job mustn't vanish unanswered or loop forever.
+  let search;
+  try {
+    search = new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch });
+  } catch (err) {
+    console.warn('KataGo: a position it cannot read', err && err.message, msg.position);
+    postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null });
+    return;
+  }
   sched.add({
     engine: msg.engine, id: msg.id, priority: msg.priority || 0,
-    search: new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch }),
+    search,
     target: msg.playouts || 100,
     batch: msg.batch || 0,
     maxTime: msg.maxTime || 60000,

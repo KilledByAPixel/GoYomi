@@ -170,3 +170,8 @@ test('a network output that isn\'t a number is an error, not a move', async () =
   row[83] = NaN;
   assert.throws(() => net.decode(row), /invalid/);
 });
+
+test('a position with a move onto a stone is refused, not built', () => {
+  const recipe = { setup: [], moves: [[parsePt('E5'), BLACK], [parsePt('C3'), WHITE], [parsePt('E5'), BLACK]], whiteFirst: false };
+  assert.throws(() => buildPosition(recipe), /E5 is already taken/);
+});

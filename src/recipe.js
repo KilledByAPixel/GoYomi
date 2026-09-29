@@ -1,6 +1,6 @@
 // Rebuilds a position (and its superko history) from Game.recipe(), for the
 // engine workers.
-import { Board, BLACK, WHITE, PASS } from './board.js';
+import { Board, BLACK, WHITE, PASS, EMPTY, ptName } from './board.js';
 
 // Returns { board, seen: hashes of every position so far, history: [{ move, color, board }]
 // for each move (board = the position after it) }.
@@ -14,6 +14,8 @@ export function buildPosition({ setup, moves, whiteFirst, resetPasses }) {
   for (const m of moves) {
     if (Array.isArray(m)) b.toPlay = m[1];
     const color = b.toPlay, move = Array.isArray(m) ? m[0] : m;
+    // A stone on a stone would corrupt the board (searching it could loop forever).
+    if (move !== PASS && b.color[move] !== EMPTY) throw new Error(`${ptName(move)} is already taken`);
     b.play(move);
     seen.add(b.hash);
     history.push({ move, color, board: b.clone() });
