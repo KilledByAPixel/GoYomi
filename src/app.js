@@ -200,6 +200,7 @@ function pvStones(color, moves) {
 
 function newGame() {
   passWarned = null; // any change of position ends a pass warning
+  resetCoachHeight();
   cancelAI();
   stopCoach();
   game = new Game({ komi: settings.komi, handicap: settings.handicap });
@@ -933,6 +934,22 @@ function renderCoach() {
         '<p class="muted small">Numbered stones show how they expect it to continue. Press <kbd>O</kbd> again to hide.</p>'));
     }
   }
+  holdCoachHeight();
+}
+
+// The Coach card only grows during a game: its text changes with every move,
+// and a card that shrank and grew back would make everything below it jump.
+// A new game, or a change of window width, starts it afresh.
+let coachHeight = 0;
+function holdCoachHeight() {
+  const card = $('.coach');
+  coachHeight = Math.max(coachHeight, card.offsetHeight);
+  card.style.minHeight = `${coachHeight}px`;
+}
+addEventListener('resize', () => { if (coachHeight) { resetCoachHeight(); renderCoach(); } });
+function resetCoachHeight() {
+  coachHeight = 0;
+  $('.coach').style.minHeight = '';
 }
 
 function renderReview() {
@@ -1214,6 +1231,7 @@ function importSGF(text) {
     cancelAI();
     stopCoach();
     game = g;
+    resetCoachHeight();
     settings.lastHuman = settings.human;
     settings.human = 0;
     settings.studyFromImport = true;

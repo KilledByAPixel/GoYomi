@@ -125,6 +125,7 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 /* ---------------------------------------------------------------- side */
 .side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .card { background: var(--card); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+.coach { min-height: 300px; } /* room for a typical comment from the start; it grows from there (holdCoachHeight) */
 .card h2 { font-size: 15px; margin: 0 0 10px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 
 .winbar {
