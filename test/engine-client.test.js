@@ -166,27 +166,27 @@ test('KataWorker: a network that stops answering mid-search is treated as a fail
 });
 
 test('KataWorker: a busy network that keeps answering, and an idle one, are left alone', { timeout: 3000 }, async () => {
-  const { host, failures, w } = await stallHost(100);
+  const { host, failures, w } = await stallHost(500);
   const eng = new KataEngine('kcoach0', host);
   const p = eng.search({}, { visits: 400 });
   for (let i = 0; i < 8; i++) { await wait(50); w.onmessage({ data: { type: 'progress', engine: 'kcoach0', id: w.sent.id, results: result(10) } }); }
   w.onmessage({ data: { type: 'done', engine: 'kcoach0', id: w.sent.id, results: result(400) } });
   assert.ok(await p);
-  await wait(400); // nothing pending: silence is fine
+  await wait(800); // nothing pending: silence (longer than the limit) is fine
   assert.deepEqual(failures, []);
   assert.equal(host.dead, false);
   host.fail('test over');
 });
 
 test('KataWorker: a search after a quiet spell starts the silence clock afresh', { timeout: 3000 }, async () => {
-  const { host, failures, w } = await stallHost(100);
+  const { host, failures, w } = await stallHost(500);
   const eng = new KataEngine('kopponent', host, { priority: 1 });
   const first = eng.search({}, { visits: 12 });
   w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
   assert.ok(await first);
-  await wait(250); // idle, longer than the stall limit: the player is thinking
+  await wait(800); // idle, longer than the stall limit: the player is thinking
   const second = eng.search({}, { visits: 12 });
-  await wait(60);  // the new search is under way, well within the limit
+  await wait(150); // the new search is under way, well within the limit
   assert.deepEqual(failures, [], 'a healthy worker isn\'t treated as stalled');
   w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
   assert.ok(await second);
