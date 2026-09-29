@@ -1190,7 +1190,8 @@ function exportSGF() {
   const counted = scoring ? (scoring.pending ? null : scoring) : game.isOver(end) && end.scoredDead ? { node: end, dead: end.scoredDead } : null;
   const result = resigned ? `${resigned === BLACK ? 'W' : 'B'}+R`
     : counted ? game.score(counted.dead, counted.node).text.replace('Draw (jigo)', '0') : '';
-  const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result });
+  // The line on show is written as the main line (the result is its result); other lines stay as variations.
+  const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result, main: end });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/x-go-sgf' }));
   a.download = `goyomi-${new Date().toISOString().slice(0, 10)}.sgf`;

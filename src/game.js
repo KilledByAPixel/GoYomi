@@ -29,10 +29,18 @@ const HANDICAP = {
   5: [[6, 2], [2, 6], [6, 6], [2, 2], [4, 4]],
 };
 
+// Record details kept from a loaded SGF and written back on saving (besides the
+// players' names, PB/PW, and the result, RE, which have their own rules).
+const RECORD_INFO = ['BR', 'WR', 'EV', 'GN', 'DT', 'PC', 'RO', 'GC', 'SO', 'US', 'AN', 'CP'];
+
 export class Game {
   constructor({ komi = 7, handicap = 0, setup = null } = {}) {
     this.komi = komi;
     this.handicap = handicap;
+    // A loaded record's details (players, event, result…), written back on saving.
+    // resultEnd is where its main line ended: the recorded result belongs there.
+    this.info = {};
+    this.resultEnd = null;
     // Chinese rules: White gets a point per handicap stone (setups aren't handicaps).
     this.handicapBonus = 0;
     const board = new Board();
@@ -159,12 +167,24 @@ export class Game {
 
   // ------------------------------------------------------------------ SGF
 
-  toSGF({ black = 'Black', white = 'White', result = '' } = {}) {
+  // main: a node whose line is written first (an export of the line on show);
+  // without it the tree keeps its order (autosave paths depend on it). A loaded
+  // record's player names and details are kept; its result too, while the saved
+  // main line still ends where the record's did, unless `result` replaces it.
+  toSGF({ black = 'Black', white = 'White', result = '', main = null } = {}) {
     const coord = p => p === PASS ? '' : String.fromCharCode(97 + ptX(p)) + String.fromCharCode(97 + ptY(p));
     const esc = s => s.replace(/\\/g, '\\\\').replace(/]/g, '\\]');
-    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoYomi]SZ[${N}]KM[${this.komi}]RU[Chinese]PB[${esc(black)}]PW[${esc(white)}]`;
+    const onMain = new Set();
+    for (let n = main; n; n = n.parent) onMain.add(n);
+    const order = n => n.children.length > 1 && onMain.size ? [...n.children].sort((a, b) => onMain.has(b) - onMain.has(a)) : n.children;
+    let end = this.root;
+    while (end.children.length) end = order(end)[0];
+    const info = this.info;
+    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoYomi]SZ[${N}]KM[${this.komi}]RU[Chinese]PB[${esc(info.PB || black)}]PW[${esc(info.PW || white)}]`;
+    for (const k of RECORD_INFO) if (info[k]) s += `${k}[${esc(info[k])}]`;
     if (this.handicap) s += `HA[${this.handicap}]`;
-    if (result) s += `RE[${result}]`;
+    const re = result || (info.RE && end === this.resultEnd ? info.RE : '');
+    if (re) s += `RE[${esc(re)}]`;
     const ab = this.setup.filter(([, c]) => c === BLACK), aw = this.setup.filter(([, c]) => c === WHITE);
     if (ab.length) s += 'AB' + ab.map(([p]) => `[${coord(p)}]`).join('');
     if (aw.length) s += 'AW' + aw.map(([p]) => `[${coord(p)}]`).join('');
@@ -178,7 +198,7 @@ export class Game {
         out += `;${n.color === BLACK ? 'B' : 'W'}[${coord(n.move)}]` + (n.comment ? `C[${esc(n.comment)}]` : '');
       }
       if (n.children.length > 1) {
-        for (const ch of n.children) {
+        for (const ch of order(n)) {
           out += `(;${ch.color === BLACK ? 'B' : 'W'}[${coord(ch.move)}]` + (ch.comment ? `C[${esc(ch.comment)}]` : '') + walk(ch) + ')';
         }
       }
@@ -264,7 +284,14 @@ export class Game {
     for (const v of rootProps.AW || []) addSetup(v, WHITE);
     const km = parseFloat(((rootProps.KM || [])[0] || '').replace(',', '.'));
     const komi = Number.isFinite(km) ? km : 7;
-    const handicap = rootProps.HA ? +rootProps.HA[0] || 0 : 0;
+    let handicap = 0;
+    if (rootProps.HA) {
+      const ha = Number(rootProps.HA[0].trim());
+      if (!Number.isInteger(ha) || ha < 0 || ha > 9) throw invalid(`handicap "${rootProps.HA[0]}" isn't a number of stones from 0 to 9`);
+      // Handicap stones placed as setup: their count is the handicap (the HA value may be wrong).
+      const black = setup.filter(([, c]) => c === BLACK).length;
+      handicap = ha >= 2 && black && black !== ha ? (black >= 2 ? black : 0) : ha;
+    }
     const game = new Game({ komi, setup: setup.length ? setup : [] });
     // A setup stone with no liberties is captured as it's placed or, placed last,
     // left on the board without any: refuse rather than show an impossible position.
@@ -275,6 +302,7 @@ export class Game {
     if (pl === 'W' || pl === 'B') game.root.board.toPlay = pl === 'W' ? WHITE : BLACK;
     else if (handicap && setup.length) game.root.board.toPlay = WHITE; // handicap: White moves first
     if (rootProps.C) game.root.comment = rootProps.C[0];
+    for (const k of ['PB', 'PW', 'RE', ...RECORD_INFO]) if (rootProps[k] && rootProps[k][0]) game.info[k] = rootProps[k][0];
     const apply = (seq, from, first) => {
       let node = from;
       seq.forEach((props, k) => {
@@ -319,6 +347,9 @@ export class Game {
       n.lastChild = n.children[0] || null;
       stack.push(...n.children);
     }
+    let end = game.root;
+    while (end.children.length) end = end.children[0];
+    game.resultEnd = end;
     return game;
   }
 }

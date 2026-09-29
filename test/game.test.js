@@ -248,3 +248,48 @@ test('SGF: a comment on a node without a move is kept, on the move before it', (
   assert.equal(e5.children[0].comment, '');
   assert.match(g.toSGF(), /B\[ee\]C\[first\n\nnote\]/);
 });
+
+test('SGF: names, result and game details survive a load and save', () => {
+  const g = Game.fromSGF('(;GM[1]FF[4]SZ[9]KM[7]PB[Alice]PW[Bob]BR[3k]WR[2k]EV[Club night]GN[Round 1]DT[2026-09-28]PC[Online]RE[W+R];B[ee];W[cc])');
+  const out = g.toSGF();
+  for (const prop of ['PB[Alice]', 'PW[Bob]', 'BR[3k]', 'WR[2k]', 'EV[Club night]', 'GN[Round 1]', 'DT[2026-09-28]', 'PC[Online]', 'RE[W+R]']) assert.ok(out.includes(prop), prop);
+  assert.ok(!out.includes('PB[Black]'));
+  // And again: a GoYomi save loaded and saved keeps them too.
+  assert.equal(Game.fromSGF(out).toSGF(), out);
+});
+
+test('SGF: a new result replaces the recorded one; playing on past the recorded end drops it', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9]KM[7]RE[B+2.5];B[ee];W[cc])');
+  assert.ok(g.toSGF({ result: 'W+R' }).includes('RE[W+R]'));
+  assert.ok(!g.toSGF({ result: 'W+R' }).includes('B+2.5'));
+  while (g.current.children.length) g.redo();
+  g.play(parsePt('G7'));
+  assert.ok(!g.toSGF().includes('RE['), 'the recorded result belonged to the shorter game');
+});
+
+test('SGF: saving from a variation writes that line first, keeping the others', () => {
+  const g = new Game({ komi: 0 });
+  g.play(parsePt('A9'));
+  const a9 = g.current;
+  g.play(parsePt('J1'));                // the original line
+  g.goTo(a9);
+  g.play(parsePt('B8'));                // a variation, now the line on show
+  const out = g.toSGF({ result: 'B+81', main: g.current });
+  const back = Game.fromSGF(out);
+  const first = back.root.children[0].children[0];
+  assert.equal(ptName(first.move), 'B8', 'the line on show comes first');
+  assert.equal(back.root.children[0].children.length, 2, 'the other variation is kept');
+  assert.ok(out.includes('RE[B+81]'));
+  // Without `main` (autosave), the tree keeps its order.
+  assert.equal(ptName(Game.fromSGF(g.toSGF()).root.children[0].children[0].move), 'J1');
+});
+
+test('SGF: a handicap that isn\'t a whole number from 0 to 9 is refused; setup stones win over a wrong count', () => {
+  for (const ha of ['Infinity', '-2', '2.5', '10', 'x']) assert.throws(() => Game.fromSGF(`(;GM[1]SZ[9]HA[${ha}])`), /handicap/, ha);
+  const g = Game.fromSGF('(;GM[1]SZ[9]HA[5]AB[aa][ii])');
+  assert.equal(g.handicap, 2);
+  assert.equal(g.handicapBonus, 2);
+  const ok = Game.fromSGF('(;GM[1]SZ[9]HA[3]AB[cc][gg][cg])');
+  assert.equal(ok.handicap, 3);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]HA[0])').handicap, 0);
+});
