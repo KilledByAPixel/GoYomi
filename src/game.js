@@ -292,9 +292,11 @@ export class Game {
     if (rootProps.HA) {
       const ha = Number(rootProps.HA[0].trim());
       if (!Number.isInteger(ha) || ha < 0 || ha > 9) throw invalid(`handicap "${rootProps.HA[0]}" isn't a number of stones from 0 to 9`);
-      // Handicap stones placed as setup: their count is the handicap (the HA value may be wrong).
+      // A handicap is its stones on the board: their count (2 to 9) is the
+      // handicap whatever HA says; with none, or more than a handicap can be,
+      // the record is a plain starting position with no handicap points.
       const black = setup.filter(([, c]) => c === BLACK).length;
-      handicap = ha >= 2 && black && black !== ha ? (black >= 2 ? black : 0) : ha;
+      handicap = ha < 2 ? ha : black >= 2 && black <= 9 ? black : 0;
     }
     const game = new Game({ komi, setup: setup.length ? setup : [] });
     // A setup stone with no liberties is captured as it's placed or, placed last,

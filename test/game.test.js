@@ -306,3 +306,29 @@ test('SGF: autosave and reload don\'t turn default names into a record\'s names'
   const old = Game.fromSGF('(;GM[1]SZ[9]KM[7]PB[Black]PW[White];B[ee])');
   assert.ok(old.toSGF({ black: 'Human', white: 'GoYomi Pebble' }).includes('PB[Human]PW[GoYomi Pebble]'));
 });
+
+test('SGF: a handicap needs its stones; no stones or an impossible count means no handicap', () => {
+  const none = Game.fromSGF('(;GM[1]SZ[9]HA[2])');
+  assert.deepEqual([none.handicap, none.handicapBonus, none.recipe().komi, none.root.board.toPlay], [0, 0, 7, BLACK], 'no stones');
+  const white = Game.fromSGF('(;GM[1]SZ[9]HA[2]AW[ee])');
+  assert.deepEqual([white.handicap, white.handicapBonus], [0, 0], 'only White setup stones');
+  const ten = Game.fromSGF('(;GM[1]SZ[9]HA[2]AB[aa][ba][ca][da][ea][fa][ga][ha][ia][ab])');
+  assert.deepEqual([ten.handicap, ten.handicapBonus, ten.recipe().komi], [0, 0, 7], 'ten stones is a position, not a handicap');
+  const fine = Game.fromSGF('(;GM[1]SZ[9]HA[3]AB[cc][gg][cg])');
+  assert.deepEqual([fine.handicap, fine.handicapBonus, fine.root.board.toPlay], [3, 3, WHITE], 'an ordinary handicap');
+});
+
+test('SGF: every record that loads can be saved and loaded again unchanged', () => {
+  const records = [
+    '(;GM[1]SZ[9]HA[2])', '(;GM[1]SZ[9]HA[1]AB[ee])', '(;GM[1]SZ[9]HA[0]AB[cc][gg])',
+    '(;GM[1]SZ[9]HA[5]AB[aa][ii])', '(;GM[1]SZ[9]HA[2]AB[aa][ba][ca][da][ea][fa][ga][ha][ia][ab])',
+    '(;GM[1]SZ[9]HA[3]AB[cc][gg][cg]AW[ee])', '(;GM[1]SZ[9]KM[0.5]HA[4]AB[cc][gg][cg][gc];W[ee];B[dd])',
+    '(;GM[1]SZ[9]PB[a\\]b]PW[c\\\\d]RE[B+2.5]EV[x];B[ee](;W[cc])(;W[gg]))',
+  ];
+  for (const r of records) {
+    const g = Game.fromSGF(r), saved = g.toSGF();
+    const back = Game.fromSGF(saved);
+    assert.equal(back.toSGF(), saved, r);
+    assert.deepEqual([back.handicap, back.handicapBonus, back.komi, back.root.board.toPlay], [g.handicap, g.handicapBonus, g.komi, g.root.board.toPlay], r);
+  }
+});
