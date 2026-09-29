@@ -293,3 +293,16 @@ test('SGF: a handicap that isn\'t a whole number from 0 to 9 is refused; setup s
   assert.equal(ok.handicap, 3);
   assert.equal(Game.fromSGF('(;GM[1]SZ[9]HA[0])').handicap, 0);
 });
+
+test('SGF: autosave and reload don\'t turn default names into a record\'s names', () => {
+  const g = new Game();
+  g.play(parsePt('E5'));
+  const saved = g.toSGF({ black: '', white: '' });   // what autosave writes
+  assert.ok(!/PB\[|PW\[/.test(saved), 'no names written when there are none');
+  const back = Game.fromSGF(saved);
+  assert.equal(back.info.PB, undefined);
+  assert.ok(back.toSGF({ black: 'Human', white: 'GoYomi Pebble' }).includes('PB[Human]PW[GoYomi Pebble]'));
+  // An older autosave with the placeholder names isn't taken as real players either.
+  const old = Game.fromSGF('(;GM[1]SZ[9]KM[7]PB[Black]PW[White];B[ee])');
+  assert.ok(old.toSGF({ black: 'Human', white: 'GoYomi Pebble' }).includes('PB[Human]PW[GoYomi Pebble]'));
+});

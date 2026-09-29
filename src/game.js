@@ -180,7 +180,11 @@ export class Game {
     let end = this.root;
     while (end.children.length) end = order(end)[0];
     const info = this.info;
-    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoYomi]SZ[${N}]KM[${this.komi}]RU[Chinese]PB[${esc(info.PB || black)}]PW[${esc(info.PW || white)}]`;
+    // Names: a loaded record's, else the ones given; none at all when both are empty (autosave).
+    const pb = info.PB || black, pw = info.PW || white;
+    let s = `(;GM[1]FF[4]CA[UTF-8]AP[GoYomi]SZ[${N}]KM[${this.komi}]RU[Chinese]`;
+    if (pb) s += `PB[${esc(pb)}]`;
+    if (pw) s += `PW[${esc(pw)}]`;
     for (const k of RECORD_INFO) if (info[k]) s += `${k}[${esc(info[k])}]`;
     if (this.handicap) s += `HA[${this.handicap}]`;
     const re = result || (info.RE && end === this.resultEnd ? info.RE : '');
@@ -303,6 +307,9 @@ export class Game {
     else if (handicap && setup.length) game.root.board.toPlay = WHITE; // handicap: White moves first
     if (rootProps.C) game.root.comment = rootProps.C[0];
     for (const k of ['PB', 'PW', 'RE', ...RECORD_INFO]) if (rootProps[k] && rootProps[k][0]) game.info[k] = rootProps[k][0];
+    // The placeholder names older autosaves wrote aren't players' names.
+    if (game.info.PB === 'Black') delete game.info.PB;
+    if (game.info.PW === 'White') delete game.info.PW;
     const apply = (seq, from, first) => {
       let node = from;
       seq.forEach((props, k) => {

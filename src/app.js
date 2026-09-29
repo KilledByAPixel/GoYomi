@@ -1148,7 +1148,8 @@ function save() {
     const dead = [];
     const walk = n => { if (n.scoredDead) dead.push({ path: pathOf(n), points: [...n.scoredDead] }); n.children.forEach(walk); };
     walk(game.root);
-    localStorage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF(), path: pathOf(game.current), resigned, dead,
+    // No names: only a loaded record's own names are kept (Save SGF names the players).
+    localStorage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF({ black: '', white: '' }), path: pathOf(game.current), resigned, dead,
       scoring: mode === 'score' && scoring ? pathOf(scoring.node) : null }));
   } catch { /* storage unavailable */ }
 }
