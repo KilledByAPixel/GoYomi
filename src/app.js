@@ -874,9 +874,10 @@ function openingTip() {
 
 function renderCoach() {
   const node = game.current, an = node.analysis;
-  const unit = kindOf(an) === 'katago' ? 'visits' : 'sims';
+  // How much the coach read: KataGo looks at positions; the built-in engine simulates games.
+  const done = an && (kindOf(an) === 'katago' ? `read ${fmtK(an.playouts)} positions` : `${fmtK(an.playouts)} simulations`);
   $('#coachStatus').textContent = !settings.coach ? 'off' : kataSettled() ? 'loading KataGo…' :
-    an ? (node.analysisDone ? `${fmtK(an.playouts)} ${unit}` : `reading… ${fmtK(an.playouts)}`) : 'reading…';
+    an ? (node.analysisDone ? done : `reading… ${fmtK(an.playouts)}`) : 'reading…';
   const bw = an ? an.blackWinrate : 0.5;
   $('#winB').style.width = `${(bw * 100).toFixed(1)}%`;
   $('#winLabelB').textContent = an ? `Black ${Math.round(bw * 100)}%` : 'Black';
