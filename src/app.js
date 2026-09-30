@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, skippedPoint, topChoices, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, skippedPoint, topChoices, easierMove, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from './wording.js';
 import { BoardView } from './view.js';
@@ -58,6 +58,7 @@ let warningsSaid = null;     // the position and atari warnings last read out
 let passWarned = null;       // the position whose too-early pass was warned about: Pass now reads "Pass anyway"
 let peek = null;             // { node, move, pv } — the coach's move previewed from a Try button (hover or focus)
 let armed = null;            // the graded move whose Try was clicked once: its preview stays, the button says Play
+let armedMove = null;        // which of its Try buttons: the coach's move or the easier one
 let swallowClick = false;    // a board click that only ended an armed preview
 let lastPointer = '';        // the last pointer used (mouse, touch, pen), or '' after a key
 let ending = false;          // ending a preview: the redraw's focus restore mustn't start it again
@@ -607,8 +608,9 @@ function gradeSpeech(node) {
   const skip = skipLine(node, shown);
   if (skip) all.push(skip);
   const lines = puzzle(node, shown) ? hideAnswer(all, answerPoints(node)) : all;
+  const easy = easyMove(node, shown);
   const said = puzzle(node, shown) ? 'There was something better here. Can you find it?'
-    : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}`;
+    : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}${easy != null ? ` An easier move that's nearly as good: ${ptName(easy)}.` : ''}`;
   return plainText(`Coach: ${shown.label}. ${said} ${lines.join(' ')}`);
 }
 
@@ -729,15 +731,16 @@ function disarm() {
   try { render(); } finally { ending = false; }
 }
 
-function peekAt(node) {
+// move: the coach's (the default) or the easier one (easyMove).
+function peekAt(node, move = node && node.grade && node.grade.bestMove) {
   const g = node && node.grade, parent = node && node.parent;
-  if (!g || !parent || g.bestMove === PASS) {
+  if (!g || !parent || move == null || move === PASS) {
     if (peek) { peek = null; renderBoard(); renderStatus(); }
     return;
   }
   parent.helped = true; // seeing the coach's move: a good move here isn't "found" alone
-  const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
-  peek = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
+  const m = parent.analysis && parent.analysis.moves.find(x => x.move === move);
+  peek = { node: parent, move, easy: move !== g.bestMove, pv: pvStones(parent.board.toPlay, [move, ...((m && m.pv) || [])]) };
   renderBoard(); renderStatus();
 }
 
@@ -750,7 +753,10 @@ const nodeById = id => {
   return null;
 };
 
-function tryInstead(node) {
+// What the Try preview on show is, for announcements.
+const previewName = () => peek && peek.easy ? 'Easier move' : "Coach's choice";
+
+function tryInstead(node, move = node.grade && node.grade.bestMove) {
   const g = node.grade;
   if (!g || !node.parent) return;
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
@@ -758,8 +764,8 @@ function tryInstead(node) {
   node.parent.helped = true;
   peek = null;
   goTo(node.parent, { verdict: false });
-  if (playMove(g.bestMove, { human: true })) {
-    const tried = node.parent.children.find(c => c.move === g.bestMove);
+  if (playMove(move, { human: true })) {
+    const tried = node.parent.children.find(c => c.move === move);
     if (tried && tried !== node) tried.backTo = { node: back, move: node.move };
   }
 }
@@ -948,12 +954,12 @@ function renderCoach() {
     if (act === 'try') {
       // A mouse has already previewed it by pointing, and a keyboard by focusing: one
       // click plays. A tap (touch has no hover) first keeps the preview on and asks for a second.
-      const touch = (e.pointerType || lastPointer) === 'touch';
-      if (!touch || armed === target) { armed = null; tryInstead(target); return; }
-      armed = target;
-      peekAt(target);
+      const touch = (e.pointerType || lastPointer) === 'touch', move = +btn.dataset.move;
+      if (!touch || (armed === target && armedMove === move)) { armed = null; tryInstead(target, move); return; }
+      armed = target; armedMove = move;
+      peekAt(target, move);
       renderCoach();
-      announce(`Coach's choice: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}. Press Play to play it.`);
+      announce(`${previewName()}: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}. Press Play to play it.`);
     }
     if (act === 'retry') retry(target);
     if (act === 'reveal') reveal(target);
@@ -1072,8 +1078,22 @@ const puzzle = (node, shown) => settings.findYourself && !!settings.human && nod
   && !node.revealed && !resigned && (shown.key === 'mistake' || shown.key === 'blunder');
 // The coach's move for node and its mirror images: what a puzzle mustn't name.
 function answerPoints(node) {
-  const g = node.grade, e = node.parent.analysis && entryFor(node.parent.analysis, g.bestMove);
-  return [g.bestMove, ...((e && e.twins) || [])].filter(q => q !== PASS);
+  const g = node.grade, an = node.parent.analysis;
+  const easy = an && easierMove(an, g.bestMove, node.move, coachLevel());
+  const pts = [];
+  for (const m of [g.bestMove, easy]) {
+    const e = m != null && an && entryFor(an, m);
+    if (m != null) pts.push(m, ...((e && e.twins) || []));
+  }
+  return pts.filter(q => q !== PASS);
+}
+
+// A move nearly as good as the coach's that the player could more easily have
+// found (coach.js easierMove), for a flagged move. Null otherwise.
+function easyMove(node, shown) {
+  const g = node.grade, an = node.parent && node.parent.analysis;
+  if (!g || !an || !shown.flagged || g.bestMove === PASS) return null;
+  return easierMove(an, g.bestMove, node.move, coachLevel());
 }
 // A Good or Best move played from a position the player went back to with Try
 // again, without being shown the answer (Show answer, Try instead, a hint or
@@ -1116,7 +1136,10 @@ function moveEntry(node) {
   } else {
     html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
-      html += `<div class="fb-actions"><button data-act="try" data-id="${node.id}">${armed === node ? `Play ${ptName(g.bestMove)}` : `Try ${ptName(g.bestMove)} instead`}</button></div>`;
+      const easy = easyMove(node, ctx.shown);
+      if (easy != null) html += `<p>An easier move that's nearly as good: <b>${ptName(easy)}</b>.</p>`;
+      const btn = m => `<button data-act="try" data-id="${node.id}" data-move="${m}">${armed === node && armedMove === m ? `Play ${ptName(m)}` : `Try ${ptName(m)} instead`}</button>`;
+      html += `<div class="fb-actions">${btn(g.bestMove)}${easy != null ? btn(easy) : ''}</div>`;
     }
   }
   if (node.backTo && !resigned) html += `<div class="fb-actions"><button data-act="back" data-id="${node.id}">Back to my move (${ptName(node.backTo.move)})</button></div>`;
@@ -1491,18 +1514,18 @@ function setupControls() {
   const ptOf = el => { const t = el && el.closest ? el.closest('[data-pt]') : null; return t ? +t.dataset.pt : null; };
   const tryOf = el => el && el.closest ? el.closest('[data-act=try]') : null;
   const peekFrom = btn => {
-    const node = btn ? nodeById(+btn.dataset.id) : null;
+    const node = btn ? nodeById(+btn.dataset.id) : null, move = btn ? +btn.dataset.move : null;
     // A preview kept on by a first click stays until it's ended (a tap elsewhere, a move, Esc):
     // pointing at or focusing anything else in the panel doesn't change it.
-    if (ending || (armed && node !== armed)) return;
-    peekAt(node);
+    if (ending || (armed && (node !== armed || move !== armedMove))) return;
+    peekAt(node, move);
   };
   const fbox = $('#feedback');
   fbox.addEventListener('pointerover', e => peekFrom(tryOf(e.target)));
   fbox.addEventListener('pointerout', e => { if (!armed && !tryOf(e.relatedTarget)) peekFrom(null); });
   fbox.addEventListener('focusin', e => {
     peekFrom(tryOf(e.target));
-    if (peek) announce(`Coach's choice: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}.`);
+    if (peek) announce(`${previewName()}: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}.`);
   });
   fbox.addEventListener('focusout', e => { if (!armed && !tryOf(e.relatedTarget)) peekFrom(null); });
   // A tap outside the armed Try button ends its preview; one on the board plays nothing.

@@ -56,6 +56,25 @@ export function keyMoments(moves, level, { max = 3, gap = 6, cap = 15 } = {}) {
   return picked.sort((a, b) => a.m.depth - b.m.depth).map(p => ({ ...p.m, turning: picked.length > 1 && p === top }));
 }
 
+// A move nearly as good as the coach's (within `within` points, well searched,
+// not the one played) that a player at `level` could more easily have found:
+// when the network thought the best move unlikely (below the level's FINDABLE
+// bar), the most natural of those that clear the bar and are at least `times`
+// as likely. Null when the best move was findable already or there's none.
+export function easierMove(an, bestMove, played, level, { within = 1, times = 3, share = 0.1 } = {}) {
+  const best = an.moves && entryFor(an, bestMove), top = an.moves && an.moves[0];
+  const bar = FINDABLE[level];
+  if (!best || best.prior == null || best.prior >= bar) return null;
+  const s = sign(an.toPlay);
+  let pick = null;
+  for (const m of an.moves) {
+    if (m === best || m.move === PASS || m.move === played || (m.twins && m.twins.includes(played))) continue;
+    if (m.visits < top.visits * share || (best.score - m.score) * s >= within) continue;
+    if (m.prior >= bar && m.prior >= best.prior * times && (!pick || m.prior > pick.prior)) pick = m;
+  }
+  return pick ? pick.move : null;
+}
+
 // A big point the player keeps passing over: of one side's graded moves
 // ({ move, bestMove, ptLoss, top }, oldest first, the latest last; top being
 // the coach's choices there, see topChoices), the run at the end where the
