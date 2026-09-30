@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines, missedLine } from '../src/wording.js';
 import { Game } from '../src/game.js';
 
 const P = parsePt;
@@ -56,16 +56,17 @@ test('describe: the G3 example at each level', () => {
     'Puts the AI\'s stone at G4 in atari: it has only 1 liberty left.',
     'The AI has to save it.',
     'After the AI answers, this guards the bottom of the board.',
+    'The AI wanted to play here too.',
   ]);
   assert.deepEqual(describe(G3_FACTS, ctx('improving')), [
     'Threatens to capture the AI\'s stone at G4.',
-    'Once the AI answers at G5, it secures your lower side (worth about 8 points), and you get to play elsewhere next (sente).',
-    'Otherwise the AI would play G3.',
+    'Once the AI answers at G5, it secures your lower side, and you get to play elsewhere next (sente).',
+    'The AI wanted to play here too.',
   ]);
   assert.deepEqual(describe(G3_FACTS, ctx('strong')), [
     'Sente: threatens to capture the AI\'s stone at G4.',
     'After G5 it secures your lower side (+8).',
-    'Otherwise the AI plays G3.',
+    "The AI's key point too.",
   ]);
 });
 
@@ -147,8 +148,8 @@ test('describe: regions of the same kind share one verb', () => {
   const f = [{ type: 'purpose', regions: [{ region: 1, kind: 'claims', points: 3 }, { region: 0, kind: 'claims', points: 2 }], value: 10 },
     { type: 'purpose', regions: [{ region: 5, kind: 'protects', points: 3 }, { region: 2, kind: 'protects', points: 2 }], value: 9 }];
   assert.deepEqual(describe(f, ctx('improving')), [
-    'It claims the upper side and the upper-left corner (worth about 10 points).',
-    'It secures your right side and upper-right corner (worth about 9 points).',
+    'It claims the upper side and the upper-left corner.',
+    'It secures your right side and upper-right corner.',
   ]);
   assert.equal(describe([f[0]], ctx('beginner'))[0], 'This claims the top of the board and the top-left corner.');
 });
@@ -251,10 +252,10 @@ test('the coach calls the opponent "the AI" in games against it, and uses colour
 });
 
 test('strong wording names the right side when the AI\'s own move is described', () => {
-  const facts = [{ type: 'initiative', sente: false }, { type: 'otherwise', move: P('C3') }];
-  assert.deepEqual(describe(facts, { level: 'strong', mover: WHITE, you: BLACK }), ['Gote: you can play elsewhere.', 'Otherwise you play C3.']);
-  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: BLACK }), ['Gote: the AI can play elsewhere.', 'Otherwise the AI plays C3.']);
-  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: 0 }), ['Gote: White can play elsewhere.', 'Otherwise White plays C3.']);
+  const facts = [{ type: 'otherwise', move: P('C3') }];
+  assert.deepEqual(describe(facts, { level: 'strong', mover: WHITE, you: BLACK }), ['Your key point too.']);
+  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: BLACK }), ["The AI's key point too."]);
+  assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: 0 }), ["White's key point too."]);
 });
 
 test('mistakeLines: only the lines that say what went wrong', () => {
@@ -263,4 +264,33 @@ test('mistakeLines: only the lines that say what went wrong', () => {
   assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'block' }, { type: 'firstLine' }], flagged('improving')), ['First-line moves are usually small this early in the game.']);
   assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'extend' }], flagged('improving')), [], 'a plain shape line is no reason');
   assert.deepEqual(mistakeLines([{ type: 'losesStones', stones: [P('C3'), P('C4')] }], flagged('improving')), ['Leaves your 2 stones at C3 to be captured.']);
+});
+
+test('describe: an area the move only works towards "builds toward" it; no area line for a flagged move', () => {
+  const f = [{ type: 'purpose', regions: [{ region: 6, kind: 'builds', points: 2 }], value: 11 }];
+  assert.deepEqual(describe(f, ctx('improving')), ['It builds toward the lower-left corner.']);
+  assert.deepEqual(describe(f, ctx('beginner')), ['This builds toward the bottom-left corner.']);
+  assert.deepEqual(describe(f, ctx('strong')), ['It builds toward the lower-left corner (+11).'], 'points only for strong players');
+  assert.deepEqual(describe(f, ctx('improving', { shown: { key: 'mistake', flagged: true } })), [], 'no praise under a Mistake');
+});
+
+test("describe: a threat that needn't be answered says so in one sentence", () => {
+  const f = [{ type: 'threat', move: P('E7'), what: { type: 'cut' } }, { type: 'initiative', sente: false, reply: P('C4') }];
+  assert.deepEqual(describe(f, ctx('improving')), ["Threatens to cut at E7, but the AI doesn't have to answer it yet."]);
+  assert.deepEqual(describe(f, ctx('strong')), ["Threatens to cut at E7, but it's gote."]);
+  assert.deepEqual(describe(f, { level: 'improving', mover: WHITE, you: BLACK }), ["Threatens to cut at E7, but you don't have to answer it yet."]);
+});
+
+test('verdict: a best move says when no other move was close', () => {
+  const best = gap => ({ grade: 'best', bestMove: P('D4'), gap });
+  const lv = level => levelGrade({ grade: 'best' }, level);
+  assert.equal(verdict(best(3.2), 'improving', lv('improving')), "Exactly the coach's choice. No other move was close: the next best was about 3 points worse.");
+  assert.equal(verdict(best(3.2), 'beginner', lv('beginner')), "Exactly the coach's choice, and no other move was close.");
+  assert.equal(verdict(best(3.2), 'strong', lv('strong')), "Exactly the coach's choice; the next best is 3.2 points worse.");
+  assert.equal(verdict(best(1), 'improving', lv('improving')), "Exactly the coach's choice.", 'close alternatives: nothing to add');
+});
+
+test('missedLine: the point the opponent took right after', () => {
+  assert.equal(missedLine(P('B4'), { mover: BLACK, you: BLACK }), 'You missed B4, and the AI took it right away.');
+  assert.equal(missedLine(P('B4'), { mover: BLACK, you: 0 }), 'Black missed B4, and White took it right away.');
 });

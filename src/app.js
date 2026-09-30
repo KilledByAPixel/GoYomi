@@ -5,7 +5,7 @@ import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
 import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, skippedPoint, topChoices, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
-import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from './wording.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines, missedLine } from './wording.js';
 import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
@@ -1043,6 +1043,15 @@ function renderReview() {
   };
 }
 
+// The point node's move missed, when the opponent played it next on the line:
+// node's better point or a mirror image of it. Null otherwise.
+function tookNext(node) {
+  const next = node.lastChild || node.children[0], g = node.grade;
+  if (!next || !g || g.bestMove === PASS || next.color === node.color) return null;
+  const e = node.parent.analysis && entryFor(node.parent.analysis, g.bestMove);
+  return next.move === g.bestMove || (e && e.twins && e.twins.includes(next.move)) ? next.move : null;
+}
+
 // Under a flagged move: the same point has been among the coach's top choices
 // for this side's last few moves (coach.js skippedPoint). Null otherwise.
 function skipLine(node, shown) {
@@ -1121,6 +1130,8 @@ function moveEntry(node) {
   }
   if (node.backTo && !resigned) html += `<div class="fb-actions"><button data-act="back" data-id="${node.id}">Back to my move (${ptName(node.backTo.move)})</button></div>`;
   const all = describe(facts, ctx);
+  const missed = g && ctx.shown && ctx.shown.flagged ? tookNext(node) : null;
+  if (missed != null) all.unshift(missedLine(missed, ctx));
   const skip = g && ctx.shown && skipLine(node, ctx.shown);
   if (skip) all.push(skip);
   const lines = g && ctx.shown && puzzle(node, ctx.shown) ? hideAnswer(all, answerPoints(node)) : all;

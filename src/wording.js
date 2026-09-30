@@ -42,7 +42,13 @@ export function levelGrade(g, level, facts = []) {
 
 // The sentence after the grade: how the move compares with the coach's choice.
 export function verdict(g, level, shown) {
-  if (g.grade === 'best') return 'Exactly the coach\'s choice.';
+  if (g.grade === 'best') {
+    // How far ahead of the next best move it was: a true reason it was best, straight from the read.
+    if (!(g.gap >= 1.5)) return 'Exactly the coach\'s choice.';
+    if (level === 'beginner') return 'Exactly the coach\'s choice, and no other move was close.';
+    if (level === 'strong') return `Exactly the coach's choice; the next best is ${g.gap.toFixed(1)} points worse.`;
+    return `Exactly the coach's choice. No other move was close: the next best was about ${Math.round(g.gap)} points worse.`;
+  }
   const passed = g.bestMove === PASS;
   const best = passed ? '<b>passing</b>' : `<b>${ptName(g.bestMove)}</b>`;
   if (!shown.flagged) {
@@ -132,6 +138,7 @@ function regionPhrase(regions, level, w, mover) {
   const kind = regions[0].kind;
   if (kind === 'protects') return B ? `guards the ${the}` : `secures ${w.poss(mover)} ${bare}`;
   if (kind === 'reduces') return B ? `takes away some of ${w.poss(3 - mover)} area in the ${the}` : `reduces ${w.poss(3 - mover)} ${bare}`;
+  if (kind === 'builds') return `builds toward the ${the}`;
   return `claims the ${the}`;
 }
 
@@ -247,22 +254,27 @@ export function describe(facts, ctx) {
         const t = f.what;
         const what = t.type === 'capture' ? `capture ${w.stones(opp, t.stones)}`
           : t.type === 'atari' ? `put ${w.stones(opp, t.stones)} in atari` : `cut at ${ptName(f.move)}`;
-        if (!B) out.push(`${S && sente ? 'Sente: t' : 'T'}hreatens to ${what}.`);
+        // A threat the opponent needn't answer yet (gote) says so in the same sentence.
+        const gote = !!init && !init.sente;
+        const but = S ? 'it\'s gote' : `${w.subj(opp)} ${w.verb(opp, 'don\'t', 'doesn\'t')} have to answer it yet`;
+        if (!B) out.push(gote ? `Threatens to ${what}, but ${but}.` : `${S && sente ? 'Sente: t' : 'T'}hreatens to ${what}.`);
         else if (atari && overlaps(t.stones, atari.stones)) {
           if (sente) out.push(`${cap(w.subj(opp))} ${w.verb(opp, 'have', 'has')} to save ${atari.stones.length === 1 ? 'it' : 'them'}.`);
         } else out.push(`Threatens to ${what}${sente ? `, so ${w.subj(opp)} ${w.verb(opp, 'have', 'has')} to answer` : ''}.`);
         break;
       }
       case 'initiative':
-        if (!f.sente && !B) out.push(S ? `Gote: ${w.subj(opp)} can play elsewhere.` :`${cap(w.subj(opp))} can play elsewhere without answering (gote).`);
-        else if (f.sente && !purpose && level === 'improving') {
+        // Gote is said with the threat; sente for improving players when the area line won't say it.
+        if (f.sente && !(purpose && !flagged) && level === 'improving') {
           out.push(`${cap(w.subj(opp))} ${w.verb(opp, 'have', 'has')} to answer, so ${w.subj(mover)} ${w.verb(mover, 'keep', 'keeps')} the initiative (sente).`);
         }
         break;
       case 'purpose': {
+        if (flagged) break; // what a move gains reads as praise under a Mistake
         const kinds = [...new Set(f.regions.map(r => r.kind))];
         const what = kinds.map(k => regionPhrase(f.regions.filter(r => r.kind === k), level, w, mover)).join(' and ');
-        const size = B || f.value < 2 ? '' : S ? ` (+${Math.round(f.value)})` : ` (worth about ${Math.round(f.value)} points)`;
+        // The value is against passing, which only strong players read as a move's size.
+        const size = S && f.value >= 2 ? ` (+${Math.round(f.value)})` : '';
         const answered = sente && init.reply !== PASS;
         if (B) out.push(answered ? `After ${w.subj(opp)} ${w.verb(opp, 'answer', 'answers')}, this ${what}.` : `This ${what}.`);
         else if (S) out.push(answered ? `After ${ptName(init.reply)} it ${what}${size}.` : `It ${what}${size}.`);
@@ -272,7 +284,8 @@ export function describe(facts, ctx) {
         break;
       }
       case 'otherwise':
-        if (!B) out.push(S ? `Otherwise ${w.subj(opp)} ${w.verb(opp, 'play', 'plays')} ${ptName(f.move)}.` :`Otherwise ${w.subj(opp)} would play ${ptName(f.move)}.`);
+        // The opponent's own best move was this same point (purposeFacts): a key point for both.
+        out.push(S ? `${cap(w.poss(opp))} key point too.` : `${cap(w.subj(opp))} wanted to play here too.`);
         break;
     }
   }
@@ -286,6 +299,12 @@ const FAULTS = new Set(['losesStones', 'selfAtari', 'ownEye', 'fewLibs', 'hopele
 export function mistakeLines(facts, ctx) {
   const plain = new Set(describe(facts.filter(f => !FAULTS.has(f.type)), ctx));
   return describe(facts, ctx).filter(t => !plain.has(t));
+}
+
+// Under a flagged move whose better point the opponent played straight after.
+export function missedLine(point, ctx) {
+  const w = words(ctx);
+  return `${cap(w.subj(ctx.mover))} missed ${ptName(point)}, and ${w.subj(3 - ctx.mover)} took it right away.`;
 }
 
 // A short note on an ungraded (AI) move: only what the player must react to.

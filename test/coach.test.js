@@ -336,3 +336,21 @@ test('topChoices: well-searched moves within a point of the best, with their mir
     { move: J1, visits: 3, score: -5 }, { move: F3, visits: 50, score: -2 }, { move: PASS, visits: 30, score: -5 }] };
   assert.deepEqual(topChoices(an).sort(), [D3, C7, G7].sort(), 'J1 barely searched, F3 3 points worse (White: lower is better), no pass');
 });
+
+test('gradeMove: a best move knows how far ahead of the next best it was', () => {
+  const A = P('E5'), B = P('D4');
+  const before = analysis(BLACK, 0.6, 3, [
+    { move: A, visits: 500, winrate: 0.6, score: 3 },
+    { move: B, visits: 100, winrate: 0.52, score: 0.5 },
+    { move: PASS, visits: 100, winrate: 0.3, score: -9 },
+  ]);
+  assert.equal(gradeMove(before, analysis(WHITE, 0.4, 3, []), A).gap, 2.5);
+  // Checked side by side, the runner-up came out only a point worse: that's the gap.
+  const g = gradeMove(before, analysis(WHITE, 0.4, -3, []), A, { move: B, analysis: analysis(WHITE, 0.45, -4, []) });
+  assert.equal(g.grade, 'best');
+  assert.equal(g.gap, 1);
+  // White to move: lower scores are better for White.
+  const w = analysis(WHITE, 0.6, -3, [{ move: A, visits: 500, winrate: 0.6, score: -3 }, { move: B, visits: 100, winrate: 0.5, score: -1 }]);
+  assert.equal(gradeMove(w, analysis(BLACK, 0.4, -3, []), A).gap, 2);
+  assert.equal(gradeMove(analysis(BLACK, 0.6, 3, [{ move: A, visits: 500, winrate: 0.6, score: 3 }]), analysis(WHITE, 0.4, 3, []), A).gap, null, 'no runner-up');
+});

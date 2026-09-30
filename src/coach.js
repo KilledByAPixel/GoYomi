@@ -292,7 +292,17 @@ export function gradeMove(before, after, move, check = null) {
   // expected from the best move. Large when the first search missed something.
   const surprise = { pt: best.score - scoreAfter, wr: best.winrate - wrAfter };
   const alternatives = before.moves.slice(0, 3).filter(m => m !== entry && m.visits >= before.moves[0].visits * 0.2);
-  return { grade, wrLoss, ptLoss, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover, checked: !!check, surprise };
+  // For a best move: how many points ahead of the next best stone it was (null
+  // with no runner-up searched enough to say), and no more than a side-by-side
+  // check of the runner-up found.
+  let gap = null;
+  if (grade === 'best') {
+    const top = entryFor(before, best.move);
+    const runner = before.moves.find(m => m !== top && m.move !== PASS && m.visits >= before.moves[0].visits * 0.05);
+    if (runner) gap = best.score - runner.score * sign(mover);
+    if (cmp && gap != null) gap = Math.min(gap, -cmp.pt);
+  }
+  return { grade, wrLoss, ptLoss, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover, checked: !!check, surprise, gap };
 }
 
 // A second read that should happen before a grade is shown, as the move whose

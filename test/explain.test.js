@@ -228,7 +228,7 @@ test('moveFacts includes threat and purpose once their reads are in', () => {
   for (const k of ['atari', 'threat', 'initiative', 'purpose', 'otherwise']) assert.ok(t.includes(k), k);
 });
 
-test('a corner move claims that corner (real search)', () => {
+test('an early corner move builds toward that corner (real search)', () => {
   const before = Board.fromRows(['.........', '.........', '.........', '.........', '.........', '.........', '..X......', '.........', '.........'], BLACK);
   const run = b => { const s = new Search(b, { komi: 7 }); s.run(6000); return s.results(20); };
   seed(1);
@@ -238,7 +238,7 @@ test('a corner move claims that corner (real search)', () => {
   const reads = { before: run(before), after: run(played(before, 'G3')), baseline: run(base) };
   const purpose = purposeFacts(P('G3'), BLACK, reads).find(f => f.type === 'purpose');
   assert.equal(purpose.regions[0].region, regionOf(P('G3')));
-  assert.equal(purpose.regions[0].kind, 'claims');
+  assert.equal(purpose.regions[0].kind, 'builds', "the corner is not expected to be Black's yet");
   assert.ok(purpose.value >= 2, `value ${purpose.value}`);
 });
 
@@ -289,4 +289,20 @@ test('cachedFacts recomputes when any read is replaced, even by one of the same 
   const b = cachedFacts(node, { after: lives });
   assert.notEqual(b, a);
   assert.ok(types(b).includes('cut') && !types(a).includes('cut'));
+});
+
+test('purposeFacts: one area near the move, "builds" until the coach expects it to be yours', () => {
+  const LL = ['A3', 'B3', 'C3', 'A2', 'B2', 'C2', 'A1', 'B1', 'C1'], UR = ['G9', 'H9', 'J9', 'G8', 'H8', 'J8', 'G7', 'H7', 'J7'];
+  const reads = own => ({ before: read(BLACK), after: read(WHITE, { own, score: 0 }), baseline: read(WHITE, { score: -10, moves: [['D5']] }) });
+  const purpose = own => purposeFacts(P('C3'), BLACK, reads(own)).find(f => f.type === 'purpose');
+  assert.equal(purpose(ownAll(LL, 0.3)).regions[0].kind, 'builds', 'gains there, but not yet expected to be Black\'s');
+  assert.equal(purpose(ownAll(LL, 0.7)).regions[0].kind, 'claims');
+  assert.equal(purpose({ ...ownAll(LL, 0.3), ...ownAll(UR, 0.8) }), undefined, 'the biggest gain is far from the move: say nothing');
+  assert.equal(purpose({ ...ownAll(LL, 0.8), ...ownAll(['D3', 'E3', 'F3', 'D2', 'E2', 'F2', 'D1', 'E1', 'F1'], 0.8) }).regions.length, 1, 'one area only');
+});
+
+test('purposeFacts: "otherwise" only when the opponent wanted the same point', () => {
+  const r = move => ({ before: read(BLACK), after: read(WHITE, { score: 0 }), baseline: read(WHITE, { score: -10, moves: [[move]] }) });
+  assert.equal(purposeFacts(P('C3'), BLACK, r('D5')).find(f => f.type === 'otherwise'), undefined);
+  assert.deepEqual(purposeFacts(P('C3'), BLACK, r('C3')).find(f => f.type === 'otherwise'), { type: 'otherwise', move: P('C3') });
 });

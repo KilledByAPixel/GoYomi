@@ -221,28 +221,36 @@ export function threatFacts(before, after, move, mover, reads) {
   return [];
 }
 
-// What the move is for: where it gains against not playing it (reads.baseline,
-// the mover passing instead), whether that protects, reduces or claims area
-// (by who owned it in reads.before), how much the move is worth, and what the
-// opponent would otherwise have played. Ownership gains are spread thin, so
-// the regions say where and the score difference says how much.
+// What the move is for: the area where it gains most against not playing it
+// (reads.baseline, the mover passing instead), whether that protects, reduces
+// or claims area, how much the move is worth, and whether the opponent would
+// otherwise have played the same point. Ownership gains are spread thin and
+// noisy, so only the biggest gain counts, and only when it's around the move
+// (a gain far away is read noise, not what the move is for). By who owned the
+// area in reads.before: protects (the mover's), reduces (the opponent's), else
+// claims when the mover is expected to own it after the move, builds when not
+// yet: early on a move only works towards an area.
 export function purposeFacts(move, mover, reads) {
   const an = reads.after, base = reads.baseline, pre = reads.before, out = [];
   if (!an || !base || !pre || move === PASS) return out;
   const s = sign(mover);
-  const gain = new Array(9).fill(0), owned = new Array(9).fill(0);
+  const gain = new Array(9).fill(0), owned = new Array(9).fill(0), after = new Array(9).fill(0);
   POINTS.forEach((p, i) => {
     const r = regionOf(p);
     gain[r] += (an.ownership[i] - base.ownership[i]) * s / 2;
     owned[r] += pre.ownership[i] * s / 9;
+    after[r] += an.ownership[i] * s / 9;
   });
-  const order = [...gain.keys()].filter(r => gain[r] >= 1).sort((a, b) => gain[b] - gain[a]);
-  const regions = order.filter((r, k) => k === 0 || (k === 1 && gain[r] >= gain[order[0]] / 2))
-    .map(r => ({ region: r, points: gain[r], kind: owned[r] > 0.3 ? 'protects' : owned[r] < -0.3 ? 'reduces' : 'claims' }));
+  const top = [...gain.keys()].reduce((a, r) => gain[r] > gain[a] ? r : a, 0);
+  const home = regionOf(move), near = Math.abs(((top / 3) | 0) - ((home / 3) | 0)) <= 1 && Math.abs(top % 3 - home % 3) <= 1;
   const value = (an.score - base.score) * s;
-  if (regions.length) out.push({ type: 'purpose', regions, value });
+  if (gain[top] >= 1 && near) {
+    const kind = owned[top] > 0.3 ? 'protects' : owned[top] < -0.3 ? 'reduces' : after[top] > 0.5 ? 'claims' : 'builds';
+    out.push({ type: 'purpose', regions: [{ region: top, points: gain[top], kind }], value });
+  }
+  // The opponent's own best move, when it's this point: a key point for both sides.
   const other = base.moves && base.moves.find(m => m.move !== PASS);
-  if (other && value >= 2) out.push({ type: 'otherwise', move: other.move });
+  if (other && value >= 2 && (other.move === move || (other.twins && other.twins.includes(move)))) out.push({ type: 'otherwise', move });
   return out;
 }
 
