@@ -225,6 +225,8 @@ function playMove(move, { human = false, news = '' } = {}) {
   const r = game.check(move);
   if (!r.ok) { flash(reasonText(r.reason), 'bad'); playSound('illegal'); return false; }
   if (human) hush(); // a new move: they're done listening
+  // Playing on from a tried coach move keeps that line: no more "Back to my move".
+  if (human) for (let n = parent, k = 0; n && k < 2; n = n.parent, k++) delete n.backTo;
   const regrade = !!(parent.children.find(c => c.move === move) || {}).grade;
   const node = game.play(move);
   if (news) flash(news);
