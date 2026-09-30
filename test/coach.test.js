@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, keyMoments, skippedPoint, topChoices, easierMove, LEVELS } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, keyMoments, skippedPoint, topChoices, LEVELS } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -335,19 +335,4 @@ test('topChoices: well-searched moves within a point of the best, with their mir
     { move: D3, visits: 100, score: -5 }, { move: C7, visits: 40, score: -4.2, twins: [G7] },
     { move: J1, visits: 3, score: -5 }, { move: F3, visits: 50, score: -2 }, { move: PASS, visits: 30, score: -5 }] };
   assert.deepEqual(topChoices(an).sort(), [D3, C7, G7].sort(), 'J1 barely searched, F3 3 points worse (White: lower is better), no pass');
-});
-
-test('easierMove: a findable move nearly as good as a hard-to-see best one', () => {
-  const G3 = parsePt('G3'), C4 = parsePt('C4'), D6 = parsePt('D6'), J1 = parsePt('J1');
-  const an = (bestPrior, c4Score = -5.5) => ({ toPlay: WHITE, moves: [
-    { move: G3, visits: 100, score: -6, prior: bestPrior },
-    { move: C4, visits: 40, score: c4Score, prior: 0.3 },
-    { move: D6, visits: 30, score: -5.8, prior: 0.1 }] });
-  assert.equal(easierMove(an(0.02), G3, J1, 'improving'), C4, 'the most natural of the close ones');
-  assert.equal(easierMove(an(0.2), G3, J1, 'improving'), null, 'the best move was easy to see already');
-  assert.equal(easierMove(an(0.02, -4.9), G3, J1, 'improving'), D6, 'C4 is a point worse (White: lower is better)');
-  assert.equal(easierMove(an(0.02), G3, C4, 'improving'), D6, 'not the move played');
-  assert.equal(easierMove(an(0.05), G3, J1, 'beginner'), C4, 'beginners have a higher bar');
-  assert.equal(easierMove(an(0.05), G3, J1, 'strong'), null, 'strong players are expected to see 5%');
-  assert.equal(easierMove({ toPlay: WHITE, moves: [{ move: G3, visits: 100, score: -6 }] }, G3, J1, 'improving'), null, 'no priors');
 });
