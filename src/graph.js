@@ -1,8 +1,10 @@
-// Win-rate / score graph along the current line of play.
+// Win-rate / score graph along the current line of play. Mistake dots (mark)
+// sit on the win-rate line, or with dotsOnScore on the score line: in handicap
+// games the win chance stays near 100% and hardly shows a mistake.
 
 const W = 600, H = 150, PAD = 6;
 
-export function renderGraph(el, line, current, onPick, mark = () => null) {
+export function renderGraph(el, line, current, onPick, mark = () => null, { dotsOnScore = false } = {}) {
   const n = Math.max(line.length - 1, 12);
   const x = i => PAD + (i / n) * (W - 2 * PAD);
   const yWr = v => PAD + (1 - v) * (H - 2 * PAD);
@@ -16,7 +18,7 @@ export function renderGraph(el, line, current, onPick, mark = () => null) {
     sc += `${penSc ? 'L' : 'M'}${x(i).toFixed(1)} ${yScore(an.score).toFixed(1)} `;
     penWr = penSc = true;
     const m = mark(node);
-    if (m) dots += `<circle cx="${x(i)}" cy="${yWr(an.blackWinrate)}" r="${m.small ? 3.5 : 5.5}" fill="${m.color}" stroke="#fff" stroke-width="1.5"/>`;
+    if (m) dots += `<circle cx="${x(i)}" cy="${dotsOnScore ? yScore(an.score) : yWr(an.blackWinrate)}" r="${m.small ? 3.5 : 5.5}" fill="${m.color}" stroke="#fff" stroke-width="1.5"/>`;
   });
   const ci = line.indexOf(current);
   el.innerHTML = `

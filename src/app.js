@@ -805,7 +805,7 @@ function render() {
   renderScorePanel();
   renderNav();
   renderStatus();
-  renderGraph($('#graph'), game.line(), game.current, goTo, graphMark);
+  renderGraph($('#graph'), game.line(), game.current, goTo, graphMark, { dotsOnScore: game.handicapBonus > 0 });
   renderReview();
 }
 
