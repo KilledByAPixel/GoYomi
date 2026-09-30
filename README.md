@@ -17,8 +17,9 @@ happened, and shows you what it would have played.
   for each move with a plain-language reason. It runs KataGo's neural
   network right in your browser. Set **Coach explains for** to
   match your experience: beginners hear about liberties and captures,
-  stronger players about points, threats and plans. **Show** puts the
-  coach's move on the board; **Try it instead** plays it for you. It tells
+  stronger players about points, threats and plans. Point at **Try it
+  instead** to preview the coach's move and how play would go on; click to
+  play it, and **Back to my move** to return. It tells
   you when the AI's move doesn't need an answer, and warns you before you
   pass too early. Turn on **Find better moves yourself** to get another try
   after a mistake before the coach shows its move.

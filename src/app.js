@@ -55,7 +55,7 @@ let hoverByKey = false;      // hoverPt is the keyboard cursor, whose readout al
 let hintOn = false;
 let warningsSaid = null;     // the position and atari warnings last read out
 let passWarned = null;       // the position whose too-early pass was warned about: Pass now reads "Pass anyway"
-let better = null;           // { node, move, pv } — coach move shown on node's board
+let peek = null;             // { node, move, pv } — the coach's move previewed from a Try button (hover or focus)
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
@@ -204,7 +204,7 @@ function newGame() {
   cancelAI();
   stopCoach();
   game = new Game({ komi: settings.komi, handicap: settings.handicap });
-  mode = 'play'; scoring = null; resigned = 0; better = null; hintOn = false;
+  mode = 'play'; scoring = null; resigned = 0; peek = null; hintOn = false;
   flashMsg = null;
   afterChange();
 }
@@ -233,7 +233,7 @@ function playMove(move, { human = false, news = '' } = {}) {
     const note = isGraded(node) ? [] : describeNote(factsFor(node).filter(f => f.type !== 'capture'), { mover: node.color, you: settings.human });
     announce([movePhrase(who(node.color), move, node.captured.length), ...note].join(' '));
   }
-  hintOn = false; better = null;
+  hintOn = false; peek = null;
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
   tryGrade(node);
@@ -288,7 +288,7 @@ function takeBack() {
   if (!game.current.parent && !resigned) return;
   if (mode === 'score') exitScoring();
   cancelAI();
-  better = null; hintOn = false;
+  peek = null; hintOn = false;
   // The first take back after resigning withdraws the resignation.
   if (resigned) { resigned = 0; flash('Resignation withdrawn. Play on!'); afterChange(); return; }
   playSound('undo');
@@ -687,7 +687,7 @@ function goTo(node, { verdict: sayVerdict = true } = {}) {
   passWarned = null; // any change of position ends a pass warning
   cancelAI();
   if (mode === 'score') exitScoring();
-  better = null; hintOn = false;
+  peek = null; hintOn = false;
   locatePt = null; // the button it came from may be rebuilt without a focusout
   game.goTo(node);
   save(); render(); scheduleCoach();
@@ -705,25 +705,46 @@ function nav(where) {
   else if (where === 'last') { const line = game.line(); goTo(line[line.length - 1]); }
 }
 
-function showBetter(node) {
-  const g = node.grade, parent = node.parent;
-  if (!g || !parent) return;
-  parent.helped = true;
-  goTo(parent, { verdict: false });
+// Try's preview: the position before the graded move, with the coach's move and
+// how it expects play to go on. Board and status line only: the game stays put.
+function peekAt(node) {
+  const g = node && node.grade, parent = node && node.parent;
+  if (!g || !parent || g.bestMove === PASS) {
+    if (peek) { peek = null; renderBoard(); renderStatus(); }
+    return;
+  }
+  parent.helped = true; // seeing the coach's move: a good move here isn't "found" alone
   const m = parent.analysis && parent.analysis.moves.find(x => x.move === g.bestMove);
-  better = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
-  const canClick = !resigned && (!aiColor() || parent.board.toPlay !== aiColor());
-  flash(`Coach's choice: ${ptName(g.bestMove)}. Numbered stones show how it expects play to go on. ${resigned ? 'Take back to keep playing' : canClick ? 'Click to try it' : `Press "Try ${ptName(g.bestMove)} instead" to play it`}, or ▶ to go back.`);
-  render();
+  peek = { node: parent, move: g.bestMove, pv: pvStones(parent.board.toPlay, [g.bestMove, ...((m && m.pv) || [])]) };
+  renderBoard(); renderStatus();
 }
+
+const nodeById = id => {
+  for (const stack = [game.root]; stack.length;) {
+    const n = stack.pop();
+    if (n.id === id) return n;
+    stack.push(...n.children);
+  }
+  return null;
+};
 
 function tryInstead(node) {
   const g = node.grade;
   if (!g || !node.parent) return;
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
+  const back = game.current; // where the player was: "Back to my move" returns here
   node.parent.helped = true;
+  peek = null;
   goTo(node.parent, { verdict: false });
-  playMove(g.bestMove, { human: true });
+  if (playMove(g.bestMove, { human: true })) {
+    const tried = node.parent.children.find(c => c.move === g.bestMove);
+    if (tried && tried !== node) tried.backTo = { node: back, move: node.move };
+  }
+}
+
+// From a tried coach move back to exactly where the player was.
+function backToMine(node) {
+  if (node.backTo && nodeById(node.backTo.node.id)) goTo(node.backTo.node, { verdict: false });
 }
 
 // ------------------------------------------------------------------ rendering
@@ -822,6 +843,11 @@ function hintWhy(node) {
 }
 
 function renderBoard() {
+  if (peek) {
+    const n = peek.node;
+    view.render({ board: n.board, nodeId: n.id, lastMove: n.parent ? n.move : PASS, captured: n.captured, capturedColor: 3 - n.color, better: peek.move, pv: peek.pv });
+    return;
+  }
   const node = game.current, b = node.board, an = node.analysis, sh = settings.show;
   const s = {
     board: b, nodeId: node.id,
@@ -840,7 +866,6 @@ function renderBoard() {
     const m = hoverPt !== null && an.moves.find(x => x.move === hoverPt);
     if (m && m.pv) s.pv = pvStones(b.toPlay, [m.move, ...m.pv]);
   }
-  if (better && better.node === node) { s.better = better.move; s.pv = better.pv; }
   if (threat && threat.node === node && threat.move) { s.threat = threat.move; s.pv = threat.pv; s.pvAccent = '#e03131'; }
   if (sh.feedback && node.grade && isGraded(node)) {
     const shown = levelGrade(node.grade, coachLevel(), factsFor(node));
@@ -897,7 +922,7 @@ function renderCoach() {
     const act = btn.dataset.act;
     const target = entries.find(n => n.id === +btn.dataset.id);
     if (!target) return;
-    if (act === 'show') showBetter(target);
+    if (act === 'back') backToMine(target);
     if (act === 'try') tryInstead(target);
     if (act === 'retry') retry(target);
     if (act === 'reveal') reveal(target);
@@ -1044,10 +1069,10 @@ function moveEntry(node) {
   } else {
     html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
-      html += `<div class="fb-actions"><button data-act="show" data-id="${node.id}" data-pt="${g.bestMove}">Show ${ptName(g.bestMove)}</button>` +
-        `<button data-act="try" data-id="${node.id}" data-pt="${g.bestMove}">Try ${ptName(g.bestMove)} instead</button></div>`;
+      html += `<div class="fb-actions"><button data-act="try" data-id="${node.id}">Try ${ptName(g.bestMove)} instead</button></div>`;
     }
   }
+  if (node.backTo && !resigned) html += `<div class="fb-actions"><button data-act="back" data-id="${node.id}">Back to my move (${ptName(node.backTo.move)})</button></div>`;
   const all = describe(facts, ctx);
   const lines = g && ctx.shown && puzzle(node, ctx.shown) ? hideAnswer(all, answerPoints(node)) : all;
   if (settings.coach && !(node.reads && node.reads.threat && node.reads.baseline)) lines.push('<span class="muted">Reading the idea behind this move…</span>');
@@ -1142,7 +1167,8 @@ function renderStatus() {
   let text = '', kind = '';
   const node = game.current;
   const h = mode === 'play' && hoverPt !== null ? hoverInfo() : null;
-  if (h && !h.ok && !hoverByKey) { text = reasonText(h.reason); kind = 'bad'; }
+  if (peek) text = `Coach's choice: ${ptName(peek.move)}. Numbered stones show how play would go on.`;
+  else if (h && !h.ok && !hoverByKey) { text = reasonText(h.reason); kind = 'bad'; }
   else if (flashMsg) { text = flashMsg.text; kind = flashMsg.kind; }
   else if (scoring) text = scoring.pending ? 'Counting…' : 'Click groups to mark them dead or alive.';
   else if (aiNode) text = aiBest ? 'Finding the best move…' : kata.state === 'loading' ? `Loading KataGo, the AI's network…` : `${aiLabel()} is thinking…`;
@@ -1236,7 +1262,7 @@ function importSGF(text) {
     settings.lastHuman = settings.human;
     settings.human = 0;
     settings.studyFromImport = true;
-    mode = 'play'; scoring = null; resigned = 0; better = null;
+    mode = 'play'; scoring = null; resigned = 0; peek = null;
     syncOptions();
     flash('Game loaded in study mode (you play both colours). Step through it and watch the coach.');
     afterChange();
@@ -1332,6 +1358,16 @@ function setupControls() {
   // Hovering (or focusing) a point the coach mentions circles it on the board.
   const locate = p => { if (p !== locatePt) { locatePt = p; renderBoard(); } };
   const ptOf = el => { const t = el && el.closest ? el.closest('[data-pt]') : null; return t ? +t.dataset.pt : null; };
+  const tryOf = el => el && el.closest ? el.closest('[data-act=try]') : null;
+  const peekFrom = btn => peekAt(btn ? nodeById(+btn.dataset.id) : null);
+  const fbox = $('#feedback');
+  fbox.addEventListener('pointerover', e => peekFrom(tryOf(e.target)));
+  fbox.addEventListener('pointerout', e => { if (!tryOf(e.relatedTarget)) peekFrom(null); });
+  fbox.addEventListener('focusin', e => {
+    peekFrom(tryOf(e.target));
+    if (peek) announce(`Coach's choice: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}.`);
+  });
+  fbox.addEventListener('focusout', e => { if (!tryOf(e.relatedTarget)) peekFrom(null); });
   for (const id of ['#feedback', '#warnings', '#threatBox', '#review']) {
     const box = $(id);
     box.addEventListener('pointerover', e => locate(ptOf(e.target)));
@@ -1388,7 +1424,7 @@ function setupControls() {
     else if (k === 'h') $('#btnHint').click();
     else if (k === 'o') toggleThreat();
     else if (k === 'p') humanPass();
-    else if (e.key === 'Escape') { better = null; hintOn = false; threat = null; scout.cancel(); render(); }
+    else if (e.key === 'Escape') { peek = null; hintOn = false; threat = null; scout.cancel(); render(); }
     else if (toggleKey[k]) {
       const key = toggleKey[k] === 'best' ? 'hints' : toggleKey[k];
       settings.show[key] = !settings.show[key];
