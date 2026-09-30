@@ -95,7 +95,8 @@ kbd {
 @keyframes pulse { 50% { stroke-opacity: .35; } }
 
 .message {
-  min-height: 2.9em; width: 100%; max-width: min(100%, calc(100vh - 170px));
+  /* Two full lines of text (1.45 line height) plus the padding, so a message of up to two lines never moves the controls below. */
+  min-height: calc(2.9em + 8px); width: 100%; max-width: min(100%, calc(100vh - 170px));
   padding: 8px 4px 0; text-align: center; color: var(--muted);
 }
 .message.bad { color: var(--warn); font-weight: 600; }
