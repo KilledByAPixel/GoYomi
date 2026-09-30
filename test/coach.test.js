@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, LEVELS } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -283,4 +283,13 @@ test('earlyPass: a read that has only just started still warns, pointing at the 
   const e = earlyPass(g.board, { moves: [], ownership: own });
   assert.equal(e.undecided, 6);
   assert.ok(['G1', 'H1', 'J1', 'G2', 'H2', 'J2'].map(parsePt).includes(e.move), 'a point in that area');
+});
+
+test('nextLevel: a win moves up one level, a loss down one, a draw stays; the ends hold', () => {
+  const top = LEVELS.length - 1;
+  assert.deepEqual(nextLevel(2, 1), { level: 3, step: 'up' });
+  assert.deepEqual(nextLevel(2, -1), { level: 1, step: 'down' });
+  assert.deepEqual(nextLevel(2, 0), { level: 2, step: 'same' });
+  assert.deepEqual(nextLevel(top, 1), { level: top, step: 'top' });
+  assert.deepEqual(nextLevel(0, -1), { level: 0, step: 'bottom' });
 });

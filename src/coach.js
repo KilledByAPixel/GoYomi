@@ -21,6 +21,16 @@ export const LEVELS = [
   { name: 'Phoenix', blurb: 'Extra hard: KataGo thinking longer. For when Dragon isn\'t enough.', playouts: 60000, temp: 0, blunder: 0, kata: { visits: 600, temp: 0 }, maxTime: 10000 },
 ];
 
+// The level ladder, as in Igowin: after a game against the AI, one level up
+// for a win (outcome 1), one down for a loss (-1), none for a draw (0).
+// step says what happened: 'up', 'down', 'same', or 'top' / 'bottom' when the
+// ladder has no further to go.
+export function nextLevel(level, outcome) {
+  if (outcome > 0) return level < LEVELS.length - 1 ? { level: level + 1, step: 'up' } : { level, step: 'top' };
+  if (outcome < 0) return level > 0 ? { level: level - 1, step: 'down' } : { level, step: 'bottom' };
+  return { level, step: 'same' };
+}
+
 // KataGo positions per round for an AI level's move. Small reads depend on it
 // (12 visits in one round of 16 is 11 moves read once each), so the app and
 // the match tools use the batch the levels were calibrated with.

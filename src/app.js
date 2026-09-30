@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, LEVEL_BATCH, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, nextLevel, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer } from './wording.js';
 import { BoardView } from './view.js';
@@ -37,6 +37,7 @@ const DEFAULTS = {
   coachEngine: 'katago',     // 'katago' or 'builtin'
   gradeAI: false,
   findYourself: false,
+  ladder: true,              // after each game against the AI, move its level up for a win, down for a loss
   lastHuman: BLACK,          // how the player played before loading a game into study mode (0: study)
   studyFromImport: false,    // study mode came from loading a game, not from New game
   coachFor: 'auto',
@@ -322,6 +323,8 @@ function resignOrScore() {
   for (const n of game.line()) if (n.grade && n.color === settings.human) { n.revealed = true; n.parent.helped = true; }
   playSound('lose');
   flash('You resigned. No shame in that — step back through the game to see where it turned.');
+  const next = ladderSentence();
+  if (next) announce(next);
   afterChange();
 }
 
@@ -657,7 +660,7 @@ async function enterScoring(restored = false) {
   scoring.pending = false;
   save();
   const s0 = game.score(scoring.dead, node);
-  announce(`Game over. ${resultPhrase(s0.winner, s0.margin)}`);
+  announce(`Game over. ${resultPhrase(s0.winner, s0.margin)} ${ladderSentence()}`.trim());
   if (!restored) playSound(settings.human && s0.winner !== settings.human ? 'lose' : 'win');
   render();
   if (!restored) $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
@@ -1104,6 +1107,53 @@ function moveEntry(node) {
   return wrap(html + list(lines));
 }
 
+// The finished game's result for the player: 1 won, -1 lost, 0 drawn, null
+// when there's no finished game against the AI (still playing, played on from
+// a count, study mode).
+function gameOutcome() {
+  if (!settings.human) return null;
+  if (resigned) return -1;
+  const s = finalScore();
+  return !s ? null : !s.winner ? 0 : s.winner === settings.human ? 1 : -1;
+}
+
+// The finished game's count: the one on show, or out of the count (reviewing,
+// say) the line's end, which kept its dead stones. null when not counted.
+function finalScore() {
+  const end = game.line().at(-1);
+  const counted = scoring ? (scoring.pending ? null : scoring) : game.isOver(end) && end.scoredDead ? { node: end, dead: end.scoredDead } : null;
+  return counted && game.score(counted.dead, counted.node);
+}
+
+// The level the next game starts at: one step along the ladder from a finished game.
+function ladderLevel() {
+  const o = settings.ladder ? gameOutcome() : null;
+  return o === null ? settings.level : nextLevel(settings.level, o).level;
+}
+
+// What the ladder does after this game, as a sentence ('' with it off or no finished game).
+function ladderSentence() {
+  const o = settings.ladder ? gameOutcome() : null;
+  if (o === null) return '';
+  const { level: n, step } = nextLevel(settings.level, o);
+  const name = `level ${n + 1} · ${LEVELS[n].name}`;
+  return {
+    up: `Next game: ${name}, one step up.`,
+    down: `Next game: ${name}, one step down.`,
+    same: `Next game: ${name} again.`,
+    top: `You beat ${LEVELS[n].name}, the strongest level!`,
+    bottom: `Next game: ${name} again. Handicap stones (in New game) make it easier still.`,
+  }[step];
+}
+
+// Below the result: where the ladder goes next, or with the ladder off, a
+// better-matched opponent after a lopsided game. margin is black-minus-white.
+function nextGameNote(margin) {
+  if (!settings.ladder) return levelAdvice(margin);
+  const next = ladderSentence();
+  return next ? `<p class="advice">${next}</p>` : '';
+}
+
 // Suggests a better-matched opponent after a lopsided game. margin is black-minus-white.
 function levelAdvice(margin) {
   if (!settings.human) return '';
@@ -1122,7 +1172,7 @@ function renderScorePanel() {
   if (!scoring && !resigned) { el.hidden = true; return; }
   el.hidden = false;
   if (resigned && !scoring) {
-    setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${levelAdvice(resigned === BLACK ? -99 : 99)}
+    setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${nextGameNote(resigned === BLACK ? -99 : 99)}
       <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`);
   } else if (scoring.pending) {
     setHTML(el, '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>');
@@ -1132,7 +1182,7 @@ function renderScorePanel() {
       s.winner === settings.human ? 'You win! 🎉' : 'The AI wins this one.';
     const tm = s.territory.margin;
     setHTML(el, `<h2>Game over · ${s.text}</h2>
-      <p class="big">${winText}</p>${levelAdvice(s.margin)}
+      <p class="big">${winText}</p>${nextGameNote(s.margin)}
       <table class="score-table">
         <tr><th></th><th>Black</th><th>White</th></tr>
         <tr><td>Stones + surrounded area</td><td>${s.black}</td><td>${s.white}</td></tr>
@@ -1238,6 +1288,7 @@ function load() {
     if (!['katago', 'builtin'].includes(settings.coachEngine)) settings.coachEngine = DEFAULTS.coachEngine;
     settings.gradeAI = !!settings.gradeAI;
     settings.findYourself = !!settings.findYourself;
+    settings.ladder = !!settings.ladder;
     if (![0, BLACK, WHITE].includes(settings.lastHuman)) settings.lastHuman = DEFAULTS.lastHuman;
     settings.studyFromImport = !!settings.studyFromImport;
     settings.speak = !!settings.speak;
@@ -1266,11 +1317,9 @@ function load() {
 
 function exportSGF() {
   const name = c => !settings.human ? colorName(c) : c === settings.human ? 'Human' : `GoYomi ${level().name}`;
-  // Out of the count (reviewing, say), a counted game keeps its result: the line's end kept its dead stones.
-  const end = game.line().at(-1);
-  const counted = scoring ? (scoring.pending ? null : scoring) : game.isOver(end) && end.scoredDead ? { node: end, dead: end.scoredDead } : null;
+  const end = game.line().at(-1), counted = finalScore();
   const result = resigned ? `${resigned === BLACK ? 'W' : 'B'}+R`
-    : counted ? game.score(counted.dead, counted.node).text.replace('Draw (jigo)', '0') : '';
+    : counted ? counted.text.replace('Draw (jigo)', '0') : '';
   // The line on show is written as the main line (the result is its result); other lines stay as variations.
   const text = game.toSGF({ black: name(BLACK), white: name(WHITE), result, main: end });
   const a = document.createElement('a');
@@ -1305,7 +1354,7 @@ function openNewGame() {
   const dlg = $('#newGameDlg'), f = dlg.querySelector('form');
   // After loading a game (study mode), offer the colour the player had before.
   f.elements.color.value = String(settings.studyFromImport ? settings.lastHuman : settings.human);
-  f.elements.level.value = String(settings.level);
+  f.elements.level.value = String(ladderLevel()); // a finished game moves the ladder
   f.elements.handicap.value = String(settings.handicap);
   f.elements.komi.value = String(settings.komi);
   dlg.returnValue = ''; // Esc keeps the previous returnValue, which would re-run newGame()
@@ -1339,6 +1388,7 @@ function syncOptions() {
   $('#optCoachFor').value = settings.coachFor;
   $('#optGradeAI').checked = settings.gradeAI;
   $('#optFindYourself').checked = settings.findYourself;
+  $('#optLadder').checked = settings.ladder;
   $('#optSpeak').checked = settings.speak;
   $('#optSound').checked = settings.sound;
   $('#toggles').querySelectorAll('input').forEach(i => { i.checked = !!settings.show[i.dataset.key]; });
@@ -1380,6 +1430,7 @@ function setupControls() {
     save(); render(); scheduleCoach();
   };
   $('#optFindYourself').onchange = e => { settings.findYourself = e.target.checked; save(); render(); };
+  $('#optLadder').onchange = e => { settings.ladder = e.target.checked; save(); render(); };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
   $('#optSpeak').onchange = e => { settings.speak = e.target.checked; setSpeech(settings.speak); save(); announce(settings.speak ? 'Speech on.' : 'Speech off.'); };
   if (!speechAvailable()) { $('#optSpeak').disabled = true; $('#speakNote').hidden = false; }

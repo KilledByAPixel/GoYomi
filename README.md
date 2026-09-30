@@ -11,7 +11,7 @@ happened, and shows you what it would have played.
 ## What you get
 
 - **An opponent at your level.** Nine AI levels from Pebble to Phoenix, all
-  played by KataGo's neural network, plus handicap stones and komi. After a lopsided game it suggests a better match.
+  played by KataGo's neural network, plus handicap stones and komi. Win and your next game is a level up; lose and it steps down.
   Play Black, White, or both sides in study mode.
 - **A coach that watches every move.** Win bar, expected score, and a grade
   for each move with a plain-language reason. It runs KataGo's neural
