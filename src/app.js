@@ -58,6 +58,7 @@ let passWarned = null;       // the position whose too-early pass was warned abo
 let peek = null;             // { node, move, pv } — the coach's move previewed from a Try button (hover or focus)
 let armed = null;            // the graded move whose Try was clicked once: its preview stays, the button says Play
 let swallowClick = false;    // a board click that only ended an armed preview
+let lastPointer = '';        // the last pointer used (mouse, touch, pen), or '' after a key
 let ending = false;          // ending a preview: the redraw's focus restore mustn't start it again
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
@@ -939,8 +940,10 @@ function renderCoach() {
     if (!target) return;
     if (act === 'back') backToMine(target);
     if (act === 'try') {
-      if (armed === target) { armed = null; tryInstead(target); return; }
-      // The first click (or tap: touch has no hover) keeps the preview on and asks for a second.
+      // A mouse has already previewed it by pointing, and a keyboard by focusing: one
+      // click plays. A tap (touch has no hover) first keeps the preview on and asks for a second.
+      const touch = (e.pointerType || lastPointer) === 'touch';
+      if (!touch || armed === target) { armed = null; tryInstead(target); return; }
       armed = target;
       peekAt(target);
       renderCoach();
@@ -1397,7 +1400,9 @@ function setupControls() {
   });
   fbox.addEventListener('focusout', e => { if (!armed && !tryOf(e.relatedTarget)) peekFrom(null); });
   // A tap outside the armed Try button ends its preview; one on the board plays nothing.
+  document.addEventListener('keydown', () => { lastPointer = ''; }, true);
   document.addEventListener('pointerdown', e => {
+    lastPointer = e.pointerType;
     swallowClick = false;
     if (!armed || (e.target.closest && e.target.closest('[data-act=try]'))) return;
     disarm();
