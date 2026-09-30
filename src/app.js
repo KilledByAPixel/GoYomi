@@ -3,9 +3,9 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, LEVEL_BATCH, nextLevel, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
-import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer } from './wording.js';
+import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from './wording.js';
 import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
@@ -99,6 +99,7 @@ const who = c => !settings.human ? colorName(c) : c === settings.human ? 'You' :
 const whose = c => !settings.human ? `${colorName(c)}'s` : c === settings.human ? 'Your' : 'AI\'s';
 const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
 const plural = (n, w) => `${n} ${n === 1 ? w : w.replace(/y$/, 'ie') + 's'}`;
+const cap = s => s[0].toUpperCase() + s.slice(1);
 const coachLevel = () => resolveLevel(settings.coachFor, settings.level);
 
 function isAITurn(node = game.current) {
@@ -1032,10 +1033,10 @@ function renderReview() {
   };
   const worst = [...stats[BLACK].worst, ...stats[WHITE].worst].sort((a, b) => b.grade.ptLoss - a.grade.ptLoss).slice(0, 5);
   const chip = n => `<button class="chip" data-id="${n.id}" data-pt="${n.move}" title="Jump to this move">#${n.depth} ${ptName(n.move)}${level === 'beginner' ? '' : ` −${n.grade.ptLoss.toFixed(0)}`}</button>`;
-  setHTML(el, linkPoints(row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '')));
+  setHTML(el, linkPoints(row(BLACK) + row(WHITE) + (worst.length ? `<div class="rv-worst"><span class="muted">Biggest:</span>${worst.map(chip).join('')}</div>` : '')) + keyMomentsHtml());
   el.onclick = e => {
     const chip = e.target.closest && e.target.closest('[data-id]');
-    const node = chip && worst.find(n => n.id === +chip.dataset.id);
+    const node = chip && game.line().find(n => n.id === +chip.dataset.id);
     if (node) goTo(node);
   };
 }
@@ -1107,6 +1108,34 @@ function moveEntry(node) {
   return wrap(html + list(lines));
 }
 
+// After a finished game against the AI, the few of the player's mistakes most
+// worth a look (coach.js keyMoments), as a list of moves to jump to. Each says
+// how big it was and why, without naming the coach's move: that's left to find
+// on the move's own card. '' while there's no finished game.
+function keyMomentsHtml() {
+  if (!settings.coach || gameOutcome() === null) return '';
+  const level = coachLevel();
+  const mine = game.line().filter(n => n.parent && n.color === settings.human && isGraded(n));
+  if (!mine.length) return '';
+  const waiting = mine.filter(n => !n.grade).length;
+  const bad = mine.filter(n => n.grade && ['mistake', 'blunder'].includes(levelGrade(n.grade, level, factsFor(n)).key));
+  const prior = n => { const e = n.parent.analysis && entryFor(n.parent.analysis, n.grade.bestMove); return e ? e.prior : undefined; };
+  const picks = keyMoments(bad.map(n => ({ depth: n.depth, ptLoss: n.grade.ptLoss, prior: prior(n), node: n })), level);
+  const item = ({ node: n, turning }) => {
+    const shown = levelGrade(n.grade, level, factsFor(n));
+    const pts = Math.max(1, Math.round(n.grade.ptLoss));
+    const size = level === 'beginner' ? shown.label : `lost about ${plural(pts, 'point')}`;
+    const why = hideAnswer(mistakeLines(factsFor(n), { level, mover: n.color, you: settings.human, shown }), answerPoints(n))[0];
+    const name = n.move === PASS ? 'pass' : ptName(n.move);
+    return `<li><button class="chip" data-id="${n.id}"${n.move === PASS ? '' : ` data-pt="${n.move}"`} title="Jump to this move">Move ${n.depth} · ${name}</button>` +
+      `${turning ? ' <b>Turning point.</b>' : ''} ${cap(size)}.${why ? ` <span class="muted">${why}</span>` : ''}</li>`;
+  };
+  const body = picks.length ? `<ul>${picks.map(item).join('')}</ul>`
+    : !waiting ? `<p>${bad.length ? 'Your mistakes this game were hard to see. The graph shows where they were.' : 'No big mistakes this game. Nicely played.'}</p>` : '';
+  const more = waiting ? `<p class="muted">The coach is still grading ${plural(waiting, 'move')}…</p>` : '';
+  return linkPoints(`<div class="key-moments"><h3>Key moments</h3>${body}${more}</div>`);
+}
+
 // The finished game's result for the player: 1 won, -1 lost, 0 drawn, null
 // when there's no finished game against the AI (still playing, played on from
 // a count, study mode).
@@ -1172,7 +1201,7 @@ function renderScorePanel() {
   if (!scoring && !resigned) { el.hidden = true; return; }
   el.hidden = false;
   if (resigned && !scoring) {
-    setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${nextGameNote(resigned === BLACK ? -99 : 99)}
+    setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${nextGameNote(resigned === BLACK ? -99 : 99)}${keyMomentsHtml()}
       <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`);
   } else if (scoring.pending) {
     setHTML(el, '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>');
@@ -1182,7 +1211,7 @@ function renderScorePanel() {
       s.winner === settings.human ? 'You win! 🎉' : 'The AI wins this one.';
     const tm = s.territory.margin;
     setHTML(el, `<h2>Game over · ${s.text}</h2>
-      <p class="big">${winText}</p>${nextGameNote(s.margin)}
+      <p class="big">${winText}</p>${nextGameNote(s.margin)}${keyMomentsHtml()}
       <table class="score-table">
         <tr><th></th><th>Black</th><th>White</th></tr>
         <tr><td>Stones + surrounded area</td><td>${s.black}</td><td>${s.white}</td></tr>
@@ -1196,6 +1225,9 @@ function renderScorePanel() {
   }
   el.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
+    const moment = !act && e.target.closest && e.target.closest('[data-id]');
+    const node = moment && game.line().find(n => n.id === +moment.dataset.id);
+    if (node) { goTo(node); return; }
     if (act === 'resume') resumeFromScoring();
     if (act === 'review') { exitScoring(); goTo(game.root); flash('Review: step through with ◀ ▶ or click the graph. Dots mark mistakes.'); }
     if (act === 'new') openNewGame();

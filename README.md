@@ -39,7 +39,9 @@ happened, and shows you what it would have played.
   the variations you've created.
 - **Scoring made simple.** Pass twice and the coach counts the game, marking
   dead stones. Click a group if you disagree.
-- **Review your games.** A game graph with mistakes marked. Click to jump to
+- **Review your games.** After each game, **Key moments** picks the two or
+  three mistakes most worth a look, ones you could have found at your level.
+  A game graph with mistakes marked. Click to jump to
   any move. Save and load SGF files. Your current game is saved automatically.
 
 Keyboard shortcuts and a one-minute guide to the rules are in the game

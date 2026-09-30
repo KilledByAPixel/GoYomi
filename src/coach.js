@@ -31,6 +31,31 @@ export function nextLevel(level, outcome) {
   return { level, step: 'same' };
 }
 
+// The moments worth reviewing after a game: of the player's flagged moves
+// ({ depth, ptLoss, prior }, prior being the network's instinct for the
+// better move), the few that lost the most among those a player at `level`
+// could have found. The loss is capped so one lost group doesn't crowd out
+// the rest; a better move the network itself thought unlikely counts less
+// (beginners get only the obvious ones), and below a tenth of full weight
+// not at all. Picks are `gap` plies apart, so one fight gives one moment.
+// Returned in move order; with more than one, the biggest is the turning point.
+const FINDABLE = { beginner: 0.15, improving: 0.08, strong: 0.03 };
+export function keyMoments(moves, level, { max = 3, gap = 6, cap = 15 } = {}) {
+  const scored = [];
+  for (const m of moves) {
+    const weight = m.prior == null ? 1 : Math.min(1, m.prior / FINDABLE[level]);
+    if (weight >= 0.1) scored.push({ m, score: Math.min(m.ptLoss, cap) * weight });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const picked = [];
+  for (const s of scored) {
+    if (picked.length >= max) break;
+    if (picked.every(p => Math.abs(p.m.depth - s.m.depth) >= gap)) picked.push(s);
+  }
+  const top = picked[0];
+  return picked.sort((a, b) => a.m.depth - b.m.depth).map(p => ({ ...p.m, turning: picked.length > 1 && p === top }));
+}
+
 // KataGo positions per round for an AI level's move. Small reads depend on it
 // (12 visits in one round of 16 is 11 moves read once each), so the app and
 // the match tools use the batch the levels were calibrated with.

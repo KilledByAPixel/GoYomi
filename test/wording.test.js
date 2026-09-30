@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BLACK, WHITE, parsePt } from '../src/board.js';
-import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer } from '../src/wording.js';
+import { resolveLevel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from '../src/wording.js';
 import { Game } from '../src/game.js';
 
 const P = parsePt;
@@ -255,4 +255,12 @@ test('strong wording names the right side when the AI\'s own move is described',
   assert.deepEqual(describe(facts, { level: 'strong', mover: WHITE, you: BLACK }), ['Gote: you can play elsewhere.', 'Otherwise you play C3.']);
   assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: BLACK }), ['Gote: the AI can play elsewhere.', 'Otherwise the AI plays C3.']);
   assert.deepEqual(describe(facts, { level: 'strong', mover: BLACK, you: 0 }), ['Gote: White can play elsewhere.', 'Otherwise White plays C3.']);
+});
+
+test('mistakeLines: only the lines that say what went wrong', () => {
+  const flagged = level => ctx(level, { shown: { key: 'mistake', flagged: true } });
+  assert.deepEqual(mistakeLines([{ type: 'emptyTriangle' }, { type: 'shape', shape: 'extend' }], flagged('improving')), ['Makes an empty triangle, an inefficient shape.']);
+  assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'block' }, { type: 'firstLine' }], flagged('improving')), ['First-line moves are usually small this early in the game.']);
+  assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'extend' }], flagged('improving')), [], 'a plain shape line is no reason');
+  assert.deepEqual(mistakeLines([{ type: 'losesStones', stones: [P('C3'), P('C4')] }], flagged('improving')), ['Leaves your 2 stones at C3 to be captured.']);
 });

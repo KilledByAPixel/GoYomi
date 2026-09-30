@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, LEVELS } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, keyMoments, LEVELS } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -292,4 +292,24 @@ test('nextLevel: a win moves up one level, a loss down one, a draw stays; the en
   assert.deepEqual(nextLevel(2, 0), { level: 2, step: 'same' });
   assert.deepEqual(nextLevel(top, 1), { level: top, step: 'top' });
   assert.deepEqual(nextLevel(0, -1), { level: 0, step: 'bottom' });
+});
+
+test('keyMoments: up to 3 flagged moves, ranked by capped loss times how findable the better move was, in move order', () => {
+  const m = (depth, ptLoss, prior) => ({ depth, ptLoss, prior });
+  const moves = [m(10, 30, 0.5), m(20, 12, 0.5), m(30, 14, 0.01), m(40, 4, 0.5), m(50, 2, 0.5)];
+  const km = keyMoments(moves, 'beginner');
+  assert.deepEqual(km.map(k => k.depth), [10, 20, 40], 'the hard-to-see move at 30 is left out for beginners');
+  assert.deepEqual(km.map(k => !!k.turning), [true, false, false], 'the biggest is the turning point');
+  // A strong player is shown the subtler one: 14 points at a third of full weight beats 4 and 2.
+  assert.deepEqual(keyMoments(moves, 'strong').map(k => k.depth), [10, 20, 30]);
+  // The loss is capped: a lost group doesn't outweigh an easy-to-find big mistake.
+  assert.equal(keyMoments([m(10, 40, 0.05), m(20, 12, 0.5)], 'improving').find(k => k.turning).depth, 20);
+});
+
+test('keyMoments: picks stay apart, a missing prior counts as findable, and none flagged gives none', () => {
+  const m = (depth, ptLoss, prior) => ({ depth, ptLoss, prior });
+  assert.deepEqual(keyMoments([m(10, 8, 0.5), m(12, 9, 0.5), m(20, 3, 0.5)], 'improving').map(k => k.depth), [12, 20], 'one fight, one pick');
+  assert.deepEqual(keyMoments([m(10, 8)], 'beginner').map(k => k.depth), [10]);
+  assert.equal(keyMoments([m(10, 8)], 'beginner')[0].turning, false, 'a single moment is not called the turning point');
+  assert.deepEqual(keyMoments([], 'strong'), []);
 });

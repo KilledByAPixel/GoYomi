@@ -170,6 +170,11 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 .rv-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rv-row .pill { font-size: 11px; padding: 1px 7px; }
 .rv-worst { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.key-moments h3 { font-size: 14px; margin: 12px 0 4px; }
+.review .key-moments h3 { font-size: 13px; margin: 4px 0 2px; }
+.key-moments ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.key-moments li .chip { margin-right: 2px; }
+.key-moments p { margin: 4px 0; }
 .graph { height: 110px; cursor: pointer; }
 .graph-svg { width: 100%; height: 100%; display: block; border-radius: 6px; }
 /* Upper half is Black's side of 50%, lower half is White's; tinted to match. */

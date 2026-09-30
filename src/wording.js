@@ -279,6 +279,15 @@ export function describe(facts, ctx) {
   return out;
 }
 
+// Of describe's lines for a flagged move, the ones that say what went wrong:
+// those the move's faults add (lines about shape or tactics can change with
+// them, like "extends solidly" becoming "makes an empty triangle").
+const FAULTS = new Set(['losesStones', 'selfAtari', 'ownEye', 'fewLibs', 'hopelessRescue', 'deadTarget', 'firstLine', 'emptyTriangle']);
+export function mistakeLines(facts, ctx) {
+  const plain = new Set(describe(facts.filter(f => !FAULTS.has(f.type)), ctx));
+  return describe(facts, ctx).filter(t => !plain.has(t));
+}
+
 // A short note on an ungraded (AI) move: only what the player must react to.
 export function describeNote(facts, ctx) {
   const opp = 3 - ctx.mover, w = words(ctx), out = [];
