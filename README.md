@@ -54,7 +54,7 @@ Every level is KataGo's neural network, held back on purpose below Dragon:
 the lower levels play on instinct without reading ahead, and choose among
 their ideas more loosely, so their mistakes look like a learner's. In
 self-play each level beat the one below it in 7 to 9 games out of 10, from
-Pebble, which plays almost at random, up to Dragon.
+Pebble, which has just learned the rules, up to Dragon.
 
 For an outside yardstick, GNU Go 3.8 at its strongest setting (about 5 to 7
 kyu on 9×9) sits around Reed: it beat Sprout 14 games to 6, lost to Reed 6

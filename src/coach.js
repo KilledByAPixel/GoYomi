@@ -7,11 +7,15 @@ import { regionOf } from './explain.js';
 // Every level plays with KataGo (`kata`: see chooseKataMove), weaker ones by
 // reading less and choosing among its instincts more randomly. Calibrated in
 // self-play (tools/levels.js): each level beat the one below in 7 to 9 games
-// out of 10, and Pebble plays like the built-in Pebble. The built-in fields
-// (playouts, temp, blunder) are the fallback where KataGo can't run.
+// out of 10, and Pebble plays like the built-in Pebble. Pebble and Seedling
+// miss among moves the network gives some chance (missFloor), not any move:
+// as strong as with any-move misses, but about a quarter to half as many
+// nonsense moves (in settled areas, or ones the network all but rules out).
+// The built-in fields (playouts, temp, blunder) are the fallback where KataGo
+// can't run.
 export const LEVELS = [
-  { name: 'Pebble', blurb: 'Just learned the rules. Misses captures: practise capturing.', playouts: 50, temp: 1, blunder: 0.3, kata: { visits: 1, temp: 2, floor: 0.001, miss: 0.5 } },
-  { name: 'Seedling', blurb: 'Plays sensible-looking moves, but misses a lot.', playouts: 220, temp: 1.2, blunder: 0.14, kata: { visits: 1, temp: 1.5, floor: 0.002, miss: 0.25 } },
+  { name: 'Pebble', blurb: 'Just learned the rules. Misses captures: practise capturing.', playouts: 50, temp: 1, blunder: 0.3, kata: { visits: 1, temp: 2, floor: 0.01, miss: 0.9, missFloor: 0.003, missTemp: 2 } },
+  { name: 'Seedling', blurb: 'Plays sensible-looking moves, but misses a lot.', playouts: 220, temp: 1.2, blunder: 0.14, kata: { visits: 1, temp: 1.5, floor: 0.01, miss: 0.45, missFloor: 0.003, missTemp: 2 } },
   { name: 'Sprout', blurb: 'Knows the basics, still leaves weaknesses.', playouts: 400, temp: 1.5, blunder: 0.1, kata: { visits: 1, temp: 1.2, floor: 0.005, miss: 0.12 } },
   { name: 'Reed', blurb: 'Fights back and punishes obvious mistakes.', playouts: 650, temp: 1.8, blunder: 0.08, kata: { visits: 1, temp: 0.9, floor: 0.01, miss: 0.03 } },
   { name: 'Stream', blurb: 'Plays good shape on instinct, but doesn\'t read ahead.', playouts: 2000, temp: 3, blunder: 0.03, kata: { visits: 1, temp: 0.45, floor: 0.05 } },
@@ -143,9 +147,11 @@ export function chooseMove(results, level, rand = Math.random) {
 // is shouldPass's decision (it passes when passing is the top move of the read
 // it's given, deeper after the opponent passes), so this only plays stones:
 // the candidates are moves with at least `floor` times the top share, drawn with
-// weight share^(1/temp); temp 0 plays the top move. With chance `miss`, any
-// legal move is drawn by prior at temperature 3: the lowest levels' real
-// mistakes (a missed capture, a stone left in atari).
+// weight share^(1/temp); temp 0 plays the top move. With chance `miss`, a
+// move is drawn by prior at temperature `missTemp` (default 3): the lowest
+// levels' real mistakes (a missed capture, a stone left in atari). Any legal
+// move, or with `missFloor` only those with that share of the top prior, top
+// excluded.
 export function chooseKataMove(results, kata, rand = Math.random) {
   const pick = m => m.twins ? [m.move, ...m.twins][(rand() * (m.twins.length + 1)) | 0] : m.move;
   const draw = (pool, t) => {
@@ -158,7 +164,13 @@ export function chooseKataMove(results, kata, rand = Math.random) {
   const list = (kata.visits > 1 ? (results.allMoves || results.moves || []).filter(m => m.move !== PASS).map(m => ({ ...m, share: m.visits }))
     : byPrior).sort((a, b) => b.share - a.share);
   if (!list.length) return PASS;
-  if (kata.miss && rand() < kata.miss && byPrior.length) return draw(byPrior, 3);
+  if (kata.miss && rand() < kata.miss && byPrior.length) {
+    // missFloor: only moves the network gives at least that share of the top one,
+    // and never the top one itself (what a learner overlooks), instead of any move.
+    const top = Math.max(...byPrior.map(m => m.share));
+    const pool = kata.missFloor ? byPrior.filter(m => m.share >= top * kata.missFloor && m.share < top) : byPrior;
+    if (pool.length) return draw(pool, kata.missTemp ?? 3);
+  }
   if (!kata.temp) return pick(list[0]);
   return draw(list.filter(m => m.share >= list[0].share * (kata.floor ?? 0.05)), kata.temp);
 }

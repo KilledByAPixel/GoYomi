@@ -42,6 +42,13 @@ test('chooseKataMove: a miss can be any legal move', () => {
   assert.ok(!seen.has('pass'));
 });
 
+test('chooseKataMove: with a miss floor, a miss is a plausible move other than the top one', () => {
+  const seen = draws(RES, { visits: 1, temp: 0.5, floor: 0.5, miss: 1, missFloor: 0.01, missTemp: 2 });
+  assert.ok(!seen.has('E5'), 'the obvious move is the one overlooked');
+  assert.ok(!seen.has('A1'), 'A1 is below the miss floor (0.001 < 0.5 × 0.01)');
+  assert.ok(seen.get('D4') > 0 && seen.get('C3') > 0);
+});
+
 test('chooseKataMove: mirror images vary; nothing to play means pass', () => {
   const sym = { allMoves: [{ move: P('C3'), visits: 50, prior: 0.2, twins: [P('G3'), P('C7'), P('G7')] }], policy: [] };
   assert.equal(draws(sym, { visits: 50, temp: 0 }).size, 4);
