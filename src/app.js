@@ -56,6 +56,9 @@ let hintOn = false;
 let warningsSaid = null;     // the position and atari warnings last read out
 let passWarned = null;       // the position whose too-early pass was warned about: Pass now reads "Pass anyway"
 let peek = null;             // { node, move, pv } — the coach's move previewed from a Try button (hover or focus)
+let armed = null;            // the graded move whose Try was clicked once: its preview stays, the button says Play
+let swallowClick = false;    // a board click that only ended an armed preview
+let ending = false;          // ending a preview: the redraw's focus restore mustn't start it again
 let flashMsg = null, flashTimer = 0;
 let aiNode = null, aiToken = 0;
 let aiBest = false;          // the current AI search is the "AI move" button's full-strength move
@@ -204,7 +207,7 @@ function newGame() {
   cancelAI();
   stopCoach();
   game = new Game({ komi: settings.komi, handicap: settings.handicap });
-  mode = 'play'; scoring = null; resigned = 0; peek = null; hintOn = false;
+  mode = 'play'; scoring = null; resigned = 0; peek = null; armed = null; hintOn = false;
   flashMsg = null;
   afterChange();
 }
@@ -235,7 +238,7 @@ function playMove(move, { human = false, news = '' } = {}) {
     const note = isGraded(node) ? [] : describeNote(factsFor(node).filter(f => f.type !== 'capture'), { mover: node.color, you: settings.human });
     announce([movePhrase(who(node.color), move, node.captured.length), ...note].join(' '));
   }
-  hintOn = false; peek = null;
+  hintOn = false; peek = null; armed = null;
   if (move === PASS) playSound('pass'); else stoneSound(node.captured.length, !!aiColor() && node.color === aiColor());
   if (!node.analysisDone) adoptAfterRead(node);
   tryGrade(node);
@@ -249,6 +252,8 @@ function playMove(move, { human = false, news = '' } = {}) {
 }
 
 function onClick(p) {
+  if (swallowClick) { swallowClick = false; return; }
+  if (armed) { disarm(); return; } // (keyboard) the board only ends the preview
   if (mode === 'score') { toggleDead(p); return; }
   if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   if (aiNode) { flash('Hold on, the AI is thinking…'); return; }
@@ -290,7 +295,7 @@ function takeBack() {
   if (!game.current.parent && !resigned) return;
   if (mode === 'score') exitScoring();
   cancelAI();
-  peek = null; hintOn = false;
+  peek = null; armed = null; hintOn = false;
   // The first take back after resigning withdraws the resignation.
   if (resigned) { resigned = 0; flash('Resignation withdrawn. Play on!'); afterChange(); return; }
   playSound('undo');
@@ -689,7 +694,7 @@ function goTo(node, { verdict: sayVerdict = true } = {}) {
   passWarned = null; // any change of position ends a pass warning
   cancelAI();
   if (mode === 'score') exitScoring();
-  peek = null; hintOn = false;
+  peek = null; armed = null; hintOn = false;
   locatePt = null; // the button it came from may be rebuilt without a focusout
   game.goTo(node);
   save(); render(); scheduleCoach();
@@ -709,6 +714,14 @@ function nav(where) {
 
 // Try's preview: the position before the graded move, with the coach's move and
 // how it expects play to go on. Board and status line only: the game stays put.
+// Ends a Try preview kept on by a first click.
+function disarm() {
+  armed = null;
+  peek = null;
+  ending = true;
+  try { render(); } finally { ending = false; }
+}
+
 function peekAt(node) {
   const g = node && node.grade, parent = node && node.parent;
   if (!g || !parent || g.bestMove === PASS) {
@@ -925,7 +938,14 @@ function renderCoach() {
     const target = entries.find(n => n.id === +btn.dataset.id);
     if (!target) return;
     if (act === 'back') backToMine(target);
-    if (act === 'try') tryInstead(target);
+    if (act === 'try') {
+      if (armed === target) { armed = null; tryInstead(target); return; }
+      // The first click (or tap: touch has no hover) keeps the preview on and asks for a second.
+      armed = target;
+      peekAt(target);
+      renderCoach();
+      announce(`Coach's choice: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}. Press Play to play it.`);
+    }
     if (act === 'retry') retry(target);
     if (act === 'reveal') reveal(target);
   };
@@ -1071,7 +1091,7 @@ function moveEntry(node) {
   } else {
     html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
-      html += `<div class="fb-actions"><button data-act="try" data-id="${node.id}">Try ${ptName(g.bestMove)} instead</button></div>`;
+      html += `<div class="fb-actions"><button data-act="try" data-id="${node.id}">${armed === node ? `Play ${ptName(g.bestMove)}` : `Try ${ptName(g.bestMove)} instead`}</button></div>`;
     }
   }
   if (node.backTo && !resigned) html += `<div class="fb-actions"><button data-act="back" data-id="${node.id}">Back to my move (${ptName(node.backTo.move)})</button></div>`;
@@ -1264,7 +1284,7 @@ function importSGF(text) {
     settings.lastHuman = settings.human;
     settings.human = 0;
     settings.studyFromImport = true;
-    mode = 'play'; scoring = null; resigned = 0; peek = null;
+    mode = 'play'; scoring = null; resigned = 0; peek = null; armed = null;
     syncOptions();
     flash('Game loaded in study mode (you play both colours). Step through it and watch the coach.');
     afterChange();
@@ -1361,15 +1381,28 @@ function setupControls() {
   const locate = p => { if (p !== locatePt) { locatePt = p; renderBoard(); } };
   const ptOf = el => { const t = el && el.closest ? el.closest('[data-pt]') : null; return t ? +t.dataset.pt : null; };
   const tryOf = el => el && el.closest ? el.closest('[data-act=try]') : null;
-  const peekFrom = btn => peekAt(btn ? nodeById(+btn.dataset.id) : null);
+  const peekFrom = btn => {
+    const node = btn ? nodeById(+btn.dataset.id) : null;
+    // A preview kept on by a first click stays until it's ended (a tap elsewhere, a move, Esc):
+    // pointing at or focusing anything else in the panel doesn't change it.
+    if (ending || (armed && node !== armed)) return;
+    peekAt(node);
+  };
   const fbox = $('#feedback');
   fbox.addEventListener('pointerover', e => peekFrom(tryOf(e.target)));
-  fbox.addEventListener('pointerout', e => { if (!tryOf(e.relatedTarget)) peekFrom(null); });
+  fbox.addEventListener('pointerout', e => { if (!armed && !tryOf(e.relatedTarget)) peekFrom(null); });
   fbox.addEventListener('focusin', e => {
     peekFrom(tryOf(e.target));
     if (peek) announce(`Coach's choice: ${ptName(peek.move)}${peek.pv.length > 1 ? ', then ' + peek.pv.slice(1, 4).map(m => ptName(m.move)).join(', ') : ''}.`);
   });
-  fbox.addEventListener('focusout', e => { if (!tryOf(e.relatedTarget)) peekFrom(null); });
+  fbox.addEventListener('focusout', e => { if (!armed && !tryOf(e.relatedTarget)) peekFrom(null); });
+  // A tap outside the armed Try button ends its preview; one on the board plays nothing.
+  document.addEventListener('pointerdown', e => {
+    swallowClick = false;
+    if (!armed || (e.target.closest && e.target.closest('[data-act=try]'))) return;
+    disarm();
+    if (e.target.closest && e.target.closest('.board-svg')) swallowClick = true;
+  }, true);
   for (const id of ['#feedback', '#warnings', '#threatBox', '#review']) {
     const box = $(id);
     box.addEventListener('pointerover', e => locate(ptOf(e.target)));
@@ -1426,7 +1459,7 @@ function setupControls() {
     else if (k === 'h') $('#btnHint').click();
     else if (k === 'o') toggleThreat();
     else if (k === 'p') humanPass();
-    else if (e.key === 'Escape') { peek = null; hintOn = false; threat = null; scout.cancel(); render(); }
+    else if (e.key === 'Escape') { peek = null; armed = null; hintOn = false; threat = null; scout.cancel(); render(); }
     else if (toggleKey[k]) {
       const key = toggleKey[k] === 'best' ? 'hints' : toggleKey[k];
       settings.show[key] = !settings.show[key];
@@ -1456,6 +1489,8 @@ window.dojo = {
   get mode() { return mode; },
   get scoring() { return scoring; },
   get aiThinking() { return !!aiNode; },
+  // The Try preview: on, and kept on by a first click (armed).
+  get preview() { return { on: !!peek, armed: !!armed }; },
   render, aiMove,
   get coach() { return coach; },
   get opponent() { return builtin.opponent; },
