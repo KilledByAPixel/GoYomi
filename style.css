@@ -40,16 +40,30 @@ kbd {
 .muted { color: var(--muted); }
 .small { font-size: 12px; font-weight: 400; }
 
+/* Beside the board: what's used while playing (.side). Below it: settings and
+   reference (.more), so the sidebar isn't a long column next to empty space.
+   One column on narrow screens, in page order. */
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "board side" "more side";
   gap: 22px;
   max-width: 1320px;
   margin: 0 auto;
   padding: 14px 18px 40px;
 }
+.board-col { grid-area: board; }
+.side { grid-area: side; align-self: start; }
+.more {
+  grid-area: more; align-self: start; justify-self: center;
+  width: 100%; max-width: max(min(100%, calc(100vh - 170px)), 720px);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start;
+}
+.more .credits { grid-column: 1 / -1; }
 @media (max-width: 900px) {
-  .app { grid-template-columns: minmax(0, 1fr); padding: 10px 16px 40px; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "board" "side" "more"; padding: 10px 16px 40px; }
+  .more { max-width: none; grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------------------------------------------------------------- board column */
