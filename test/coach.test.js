@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, pt, parsePt } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, keyMoments, LEVELS } from '../src/coach.js';
+import { estimateDead, gradeMove, reviewNeeded, preferUsefulMove, readRecipe, workKey, gradesMove, GRADING, chooseMove, shouldPass, isSettled, threats, earlyPass, nextLevel, keyMoments, skippedPoint, topChoices, LEVELS } from '../src/coach.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -312,4 +312,27 @@ test('keyMoments: picks stay apart, a missing prior counts as findable, and none
   assert.deepEqual(keyMoments([m(10, 8)], 'beginner').map(k => k.depth), [10]);
   assert.equal(keyMoments([m(10, 8)], 'beginner')[0].turning, false, 'a single moment is not called the turning point');
   assert.deepEqual(keyMoments([], 'strong'), []);
+});
+
+test("skippedPoint: a point among the coach's top choices passed over move after move", () => {
+  const D3 = parsePt('D3'), C7 = parsePt('C7');
+  // top: the coach's choices within a point of its best; bestMove: its first choice.
+  const m = (move, bestMove, ptLoss, top = [bestMove]) => ({ move, bestMove, ptLoss, top });
+  const a = parsePt('A1'), b = parsePt('B1'), c = parsePt('J9');
+  assert.deepEqual(skippedPoint([m(a, D3, 3), m(b, D3, 2), m(c, D3, 5)]), { point: D3, count: 3 });
+  assert.deepEqual(skippedPoint([m(a, C7, 3, [C7, D3]), m(b, D3, 2), m(c, D3, 5)]), { point: D3, count: 3 }, 'a close second still counts');
+  assert.deepEqual(skippedPoint([m(a, C7, 3), m(a, D3, 3), m(b, D3, 2), m(c, D3, 5)]), { point: D3, count: 3 }, 'counts only the run');
+  assert.equal(skippedPoint([m(a, D3, 3), m(b, D3, 2)]), null, 'two is not yet a pattern');
+  assert.equal(skippedPoint([m(a, D3, 3), m(b, D3, 0.5), m(c, D3, 5)]), null, 'a near-equal move breaks the run');
+  assert.equal(skippedPoint([m(a, D3, 3), m(b, C7, 4), m(c, D3, 5)]), null, 'a move where it was no top choice breaks it');
+  assert.equal(skippedPoint([m(a, PASS, 3), m(b, PASS, 2), m(c, PASS, 5)]), null, 'passing is not a point');
+  assert.equal(skippedPoint([]), null);
+});
+
+test('topChoices: well-searched moves within a point of the best, with their mirror images', () => {
+  const D3 = parsePt('D3'), C7 = parsePt('C7'), G7 = parsePt('G7'), J1 = parsePt('J1'), F3 = parsePt('F3');
+  const an = { toPlay: WHITE, moves: [
+    { move: D3, visits: 100, score: -5 }, { move: C7, visits: 40, score: -4.2, twins: [G7] },
+    { move: J1, visits: 3, score: -5 }, { move: F3, visits: 50, score: -2 }, { move: PASS, visits: 30, score: -5 }] };
+  assert.deepEqual(topChoices(an).sort(), [D3, C7, G7].sort(), 'J1 barely searched, F3 3 points worse (White: lower is better), no pass');
 });

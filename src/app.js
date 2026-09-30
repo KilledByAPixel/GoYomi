@@ -3,7 +3,7 @@
 import { BLACK, WHITE, EMPTY, PASS, POINTS, ptName } from './board.js';
 import { Game, reasonText, colorName } from './game.js';
 import { Engine, EnginePool, KataWorker, KataEngine, KataPool, MIN_RATE, effort } from './engine-client.js';
-import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
+import { LEVELS, LEVEL_BATCH, nextLevel, keyMoments, skippedPoint, topChoices, earlyPass, chooseMove, chooseKataMove, shouldPass, estimateDead, gradeMove, reviewNeeded, entryFor, preferUsefulMove, readRecipe, workKey, gradesMove, GRADES, threats, describeScore } from './coach.js';
 import { boardFacts, cachedFacts } from './explain.js';
 import { COACH_FOR, resolveLevel, gradeLabel, levelGrade, verdict, describe, describeNote, atariWarnings, ignoreNote, hintReason, regionName, hideAnswer, mistakeLines } from './wording.js';
 import { BoardView } from './view.js';
@@ -604,6 +604,8 @@ function announceGrade(node) {
 function gradeSpeech(node) {
   const level = coachLevel(), facts = factsFor(node), shown = levelGrade(node.grade, level, facts);
   const all = describe(facts, { level, mover: node.color, you: settings.human, shown });
+  const skip = skipLine(node, shown);
+  if (skip) all.push(skip);
   const lines = puzzle(node, shown) ? hideAnswer(all, answerPoints(node)) : all;
   const said = puzzle(node, shown) ? 'There was something better here. Can you find it?'
     : `${found(node, shown) ? 'You found it! ' : ''}${verdict(node.grade, level, shown)}`;
@@ -1041,6 +1043,22 @@ function renderReview() {
   };
 }
 
+// Under a flagged move: the same point has been among the coach's top choices
+// for this side's last few moves (coach.js skippedPoint). Null otherwise.
+function skipLine(node, shown) {
+  if (!shown.flagged) return null;
+  const run = [];
+  for (let n = node; n.parent && run.length < 12; n = n.parent) {
+    if (n.color !== node.color || !isGraded(n)) continue;
+    if (!n.grade) break;
+    run.unshift({ move: n.move, bestMove: n.grade.bestMove, ptLoss: n.grade.ptLoss, top: topChoices(n.parent.analysis) });
+  }
+  const s = skippedPoint(run);
+  if (!s) return null;
+  const whose = node.color === settings.human ? 'your' : `${colorName(node.color)}'s`;
+  return `${ptName(s.point)} has been one of the coach's top choices for ${whose} last ${s.count} moves. What makes it so big?`;
+}
+
 // Under the AI's latest move: "you don't need to answer this", once the coach
 // has read the player's position (games against the AI only).
 function ignoreLine(node) {
@@ -1103,6 +1121,8 @@ function moveEntry(node) {
   }
   if (node.backTo && !resigned) html += `<div class="fb-actions"><button data-act="back" data-id="${node.id}">Back to my move (${ptName(node.backTo.move)})</button></div>`;
   const all = describe(facts, ctx);
+  const skip = g && ctx.shown && skipLine(node, ctx.shown);
+  if (skip) all.push(skip);
   const lines = g && ctx.shown && puzzle(node, ctx.shown) ? hideAnswer(all, answerPoints(node)) : all;
   if (settings.coach && !(node.reads && node.reads.threat && node.reads.baseline)) lines.push('<span class="muted">Reading the idea behind this move…</span>');
   return wrap(html + list(lines));

@@ -56,6 +56,40 @@ export function keyMoments(moves, level, { max = 3, gap = 6, cap = 15 } = {}) {
   return picked.sort((a, b) => a.m.depth - b.m.depth).map(p => ({ ...p.m, turning: picked.length > 1 && p === top }));
 }
 
+// A big point the player keeps passing over: of one side's graded moves
+// ({ move, bestMove, ptLoss, top }, oldest first, the latest last; top being
+// the coach's choices there, see topChoices), the run at the end where the
+// latest choice was among the top ones every time and each move played
+// elsewhere lost at least `loss` points. { point, count } for a run of `min`
+// or more, else null. Top choices rather than the first: on an open board a
+// few points are about as big, and the first choice hops between them.
+export function skippedPoint(moves, { min = 3, loss = 1.5 } = {}) {
+  const last = moves.at(-1);
+  if (!last || last.bestMove === PASS) return null;
+  const p = last.bestMove;
+  let count = 0;
+  for (let i = moves.length - 1; i >= 0; i--) {
+    const m = moves[i];
+    if (m.move === p || m.ptLoss < loss || !(m.bestMove === p || m.top.includes(p))) break;
+    count++;
+  }
+  return count >= min ? { point: p, count } : null;
+}
+
+// The coach's top choices in a position: moves searched at least `share` as
+// much as the first and within `within` points of it, with their mirror
+// images. Passing isn't one.
+export function topChoices(an, { within = 1, share = 0.1 } = {}) {
+  const best = an.moves && an.moves[0];
+  if (!best) return [];
+  const s = sign(an.toPlay), out = [];
+  for (const m of an.moves) {
+    if (m.move === PASS || m.visits < best.visits * share || (best.score - m.score) * s > within) continue;
+    out.push(m.move, ...(m.twins || []));
+  }
+  return out;
+}
+
 // KataGo positions per round for an AI level's move. Small reads depend on it
 // (12 visits in one round of 16 is 11 moves read once each), so the app and
 // the match tools use the batch the levels were calibrated with.

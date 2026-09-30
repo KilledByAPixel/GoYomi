@@ -21,7 +21,8 @@ happened, and shows you what it would have played.
   instead** to preview the coach's move and how play would go on, click to
   play it (on a touch screen, tap to preview, then **Play**), and **Back to
   my move** to return. It tells
-  you when the AI's move doesn't need an answer, and warns you before you
+  you when the AI's move doesn't need an answer, points out a big point you
+  keep passing over, and warns you before you
   pass too early. Turn on **Find better moves yourself** to get another try
   after a mistake before the coach shows its move.
 - **Accessible: play by keyboard or by ear.** GoYomi is built to be played
