@@ -74,6 +74,15 @@ kbd {
 }
 .brand { font-weight: 750; font-size: 20px; letter-spacing: .2px; }
 .brand span { color: var(--accent); font-weight: 600; }
+/* The coach badge: only where the coach card isn't beside the board. */
+.coach-badge {
+  margin-left: auto; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: .2px;
+  background: var(--pill, #888); border-color: transparent; color: #fff;
+}
+.coach-badge.pending { background: var(--line); color: var(--muted); }
+.coach-badge:hover:not(:disabled) { background: var(--pill, #888); filter: brightness(1.08); }
+.coach-badge.pending:hover:not(:disabled) { background: var(--line); }
+@media (min-width: 901px) { .coach-badge { display: none; } }
 .players { display: flex; gap: 8px; }
 .player {
   display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px;
@@ -125,12 +134,17 @@ button:disabled { opacity: .45; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 button.primary:hover:not(:disabled) { filter: brightness(1.07); background: var(--accent); }
 button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
+/* Hovered (or, on a touch screen, last tapped) it stays light, so its dark text stays readable in dark mode. */
+button.on:hover:not(:disabled) { background: #ffeca6; }
 .nav { align-items: center; }
 .nav button { min-width: 42px; }
 .move-label { min-width: 170px; text-align: center; font-variant-numeric: tabular-nums; }
 /* Phones: the row spans the board and the label gives way, rather than wrapping (it needs 362px). */
 @media (max-width: 480px) {
   .nav { align-self: stretch; flex-wrap: nowrap; }
+  /* Two rows of game buttons instead of three. */
+  .controls { gap: 5px; }
+  .controls button { padding: 7px 9px; }
   .move-label { min-width: 0; flex: 1; }
 }
 .variations { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; margin-top: 8px; font-size: 13px; }

@@ -922,7 +922,30 @@ function openingTip() {
   return 'You are White. The AI moves first. White gets komi (bonus points) for going second.';
 }
 
+// On narrow screens the coach card is below the board: a badge beside the
+// logo shows the grade of the player's latest move (study mode: the latest
+// move's), and tapping it scrolls to the card. Hidden by CSS where the card
+// is beside the board.
+function renderBadge() {
+  const el = $('#coachBadge'), cur = game.current;
+  const node = !settings.human ? cur : [cur, cur.parent].find(n => n && n.parent && n.color === settings.human);
+  const shows = settings.coach && settings.show.feedback && mode === 'play' && node && node.parent && isGraded(node);
+  if (!shows) { el.hidden = true; return; }
+  const pt = node.move === PASS ? 'pass' : ptName(node.move);
+  const shown = node.grade && levelGrade(node.grade, coachLevel(), factsFor(node));
+  const text = shown ? `${shown.label} · ${pt}` : 'grading…';
+  const key = `${text}|${shown ? shown.color : ''}`;
+  el.hidden = false;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.textContent = `${text} ↓`;
+  el.classList.toggle('pending', !shown);
+  el.style.setProperty('--pill', shown ? shown.color : '');
+  el.setAttribute('aria-label', shown ? `Coach: ${shown.label} on ${pt}. Show the coach's comments.` : 'Coach: still grading your move. Show the coach.');
+}
+
 function renderCoach() {
+  renderBadge();
   const node = game.current, an = node.analysis;
   // How much the coach read: KataGo looks at positions; the built-in engine simulates games.
   const done = an && (kindOf(an) === 'katago' ? `read ${fmtK(an.playouts)} positions` : `${fmtK(an.playouts)} simulations`);
@@ -1515,6 +1538,7 @@ function setupControls() {
   };
   $('#optFindYourself').onchange = e => { settings.findYourself = e.target.checked; save(); render(); };
   $('#optLadder').onchange = e => { settings.ladder = e.target.checked; save(); render(); };
+  $('#coachBadge').onclick = () => $('.coach').scrollIntoView({ behavior: 'smooth', block: 'start' });
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
   $('#optSpeak').onchange = e => { settings.speak = e.target.checked; setSpeech(settings.speak); save(); announce(settings.speak ? 'Speech on.' : 'Speech off.'); };
   if (!speechAvailable()) { $('#optSpeak').disabled = true; $('#speakNote').hidden = false; }
