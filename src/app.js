@@ -85,7 +85,7 @@ const builtin = {
 const kata = { state: 'off', host: null, opponent: null, coach: null, scout: null, info: null };
 // The engines the coach reads with: KataGo's once it's ready (if chosen), else the built-in ones.
 let coach = builtin.coach, scout = builtin.scout;
-Engine.onError = (name, msg) => flash(`The ${name} engine stopped working (${msg}). Reload the page; if it keeps happening, try a current Chrome, Firefox or Safari.`, 'bad');
+Engine.onError = (name, msg) => flash(`The ${name} engine stopped working (${msg}). It restarts by itself on the next move (press AI move to try again); if it keeps happening, reload the page or try a current Chrome, Firefox or Safari.`, 'bad');
 const view = new BoardView($('#board'), { onClick, onHover, onCursor });
 
 // The keyboard cursor moved: say what's there.

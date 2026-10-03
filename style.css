@@ -223,6 +223,7 @@ button.on { background: #fff3c4; border-color: #e2c35a; color: #3b2f00; }
 .settings label.inline { justify-content: flex-start; }
 .settings select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn); }
 .settings .help { margin-top: -6px; font-size: 12px; }
+.settings .save-note { margin-top: 0; color: var(--warn); }
 .settings .row { display: flex; gap: 8px; }
 
 .learn details { border-top: 1px solid var(--line); padding: 8px 0; }

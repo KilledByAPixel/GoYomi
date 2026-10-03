@@ -24,3 +24,10 @@ test('page: no id is used twice', () => {
   const twice = pageIds.filter((id, i) => pageIds.indexOf(id) !== i);
   assert.deepEqual(twice, []);
 });
+
+test("page: the browser's storage is reached in one place, and a game that isn't saved says so", () => {
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.equal(app.match(/localStorage/g).length, 1, 'only safeStorage(() => localStorage)');
+  assert.match(html, /id="saveNote"[^>]*hidden>/);
+  assert.ok(app.includes("'Your game is not being saved in this browser. Use Save SGF to keep it.'"));
+});
