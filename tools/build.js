@@ -12,6 +12,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { outputRefusal, MARKER } from './build-guard.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const src = path.join(root, 'src');
@@ -19,6 +20,9 @@ const src = path.join(root, 'src');
 const arg = k => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const dist = path.resolve(arg('--out') || path.join(root, 'dist'));
 const noZip = process.argv.includes('--no-zip');
+// The output is emptied before writing: refuse a directory that isn't the build's to clear.
+const refusal = outputRefusal(root, dist);
+if (refusal) { console.error(`Not building into ${dist}: ${refusal}.`); process.exit(1); }
 
 // ------------------------------------------------------------------ module inliner
 
@@ -152,9 +156,6 @@ function zip(entries) {
 // tf.js stamps inside it, app.js covers the workers', the page covers app.js.
 const stamp = buf => createHash('sha256').update(buf).digest('hex').slice(0, 10);
 
-fs.rmSync(dist, { recursive: true, force: true });
-fs.mkdirSync(dist, { recursive: true });
-
 const files = new Map(); // dist name -> Buffer
 for (const f of fs.readdirSync(path.join(root, 'vendor'))) files.set(`vendor/${f}`, fs.readFileSync(path.join(root, 'vendor', f)));
 for (const f of ['b6c96.bin', 'LICENSE.txt']) files.set(`nets/${f}`, fs.readFileSync(path.join(root, 'nets', f)));
@@ -226,6 +227,12 @@ swap('<script type="module" src="src/app.js"></script>', `<meta name="goyomi-ver
 files.set('index.html', Buffer.from(html));
 files.set('version.json', Buffer.from(JSON.stringify({ version }) + '\n'));
 
+// Everything is read and bundled (and zipped) in memory first: a build that
+// fails on the way leaves the last output as it was.
+const archive = noZip ? null : zip([...files]);
+fs.rmSync(dist, { recursive: true, force: true });
+fs.mkdirSync(dist, { recursive: true });
+fs.writeFileSync(path.join(dist, MARKER), 'Made by tools/build.js: this directory is emptied by every build.\n');
 for (const [name, data] of files) {
   fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
   fs.writeFileSync(path.join(dist, name), data);
@@ -233,7 +240,7 @@ for (const [name, data] of files) {
 const kb = n => `${(n / 1024).toFixed(1)} KB`;
 for (const [name, data] of files) console.log(`  ${name.padEnd(36)} ${kb(data.length)}`);
 if (!noZip) {
-  fs.writeFileSync(path.join(dist, 'goyomi.zip'), zip([...files]));
+  fs.writeFileSync(path.join(dist, 'goyomi.zip'), archive);
   console.log(`  ${'goyomi.zip'.padEnd(36)} ${kb(fs.statSync(path.join(dist, 'goyomi.zip')).size)}`);
 }
 console.log(`Built ${path.relative(root, dist) || dist} (${files.size} files${noZip ? '' : ' + zip'}), version ${version}`);
