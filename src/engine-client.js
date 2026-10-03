@@ -5,22 +5,36 @@ import { BLACK } from './board.js';
 export class Engine {
   constructor(name) {
     this.name = name;
-    this.worker = new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' });
     this.nextId = 1;
     this.pending = null;
-    this.worker.onmessage = e => this.onMessage(e.data);
-    this.worker.onerror = e => {
-      console.error(`${name} worker error`, e.message);
+    this.start();
+  }
+
+  // A worker that breaks is ended and marked failed, and the next search
+  // starts a new one: one new worker per search asked for, so a worker that
+  // can never start isn't rebuilt in a loop. Messages and errors from a
+  // replaced worker are ignored.
+  start() {
+    const worker = this.worker = new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module' });
+    this.failed = false;
+    const mine = () => this.worker === worker && !this.failed;
+    worker.onmessage = e => { if (mine()) this.onMessage(e.data); };
+    worker.onerror = e => {
+      if (!mine()) return;
+      console.error(`${this.name} worker error`, e.message);
+      this.failed = true;
+      try { worker.terminate(); } catch { /* already gone */ }
       // Fail the running search instead of leaving the caller waiting forever.
       const job = this.pending;
       this.pending = null;
       if (job) job.resolve(null);
-      if (Engine.onError) Engine.onError(name, e.message || 'failed to load');
+      if (Engine.onError) Engine.onError(this.name, e.message || 'failed to load');
     };
   }
 
   search(position, { playouts = 10000, maxTime = 60000, onProgress = null, reportMs = 250 } = {}) {
     this.cancel();
+    if (this.failed) this.start();
     const id = this.nextId++;
     return new Promise(resolve => {
       this.pending = { id, resolve, onProgress };

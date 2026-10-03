@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 // Stub Web Workers: tests drive their messages and errors by hand.
 const stubs = [];
 globalThis.Worker = class { constructor() { stubs.push(this); } postMessage(m) { if (m.type === 'search') this.sent = m; } terminate() { this.terminated = true; } };
-const { EnginePool, KataWorker, KataEngine } = await import('../src/engine-client.js');
+const { Engine, EnginePool, KataWorker, KataEngine } = await import('../src/engine-client.js');
 
 const result = playouts => ({ toPlay: 1, playouts, blackWinrate: 0.5, score: 1, ownership: new Array(81).fill(0),
   moves: [{ move: 40, visits: playouts, winrate: 0.5, score: 1, prior: 1, pv: [] }] });
@@ -191,4 +191,62 @@ test('KataWorker: a search after a quiet spell starts the silence clock afresh',
   w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
   assert.ok(await second);
   host.fail('test over');
+});
+
+test('Engine: a worker that broke before any search is replaced by the next search', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  const errors = [];
+  Engine.onError = (name, msg) => errors.push(msg);
+  const e = new Engine('t');
+  stubs[0].onerror({ message: 'failed to load' });
+  assert.ok(stubs[0].terminated, 'the broken worker is ended');
+  const p = e.search({}, { playouts: 10 });
+  assert.equal(stubs.length, 2, 'a new worker');
+  done(stubs[1], result(10));
+  assert.equal((await p).playouts, 10);
+  assert.deepEqual(errors, ['failed to load']);
+  Engine.onError = null;
+});
+
+test('Engine: one that breaks mid-search answers it with null, and the next search is answered', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  Engine.onError = null;
+  const e = new Engine('t');
+  const first = e.search({}, { playouts: 10 });
+  stubs[0].onerror({ message: 'boom' });
+  assert.equal(await first, null);
+  const second = e.search({}, { playouts: 10 });
+  // A late message from the replaced worker is nobody's.
+  stubs[0].onmessage({ data: { type: 'done', id: stubs[1].sent.id, results: result(99) } });
+  done(stubs[1], result(10));
+  assert.equal((await second).playouts, 10);
+});
+
+test('Engine: two failures in a row give null each and one report each, nothing left waiting', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  const errors = [];
+  Engine.onError = (name, msg) => errors.push(msg);
+  const e = new Engine('t');
+  const a = e.search({}, { playouts: 10 });
+  stubs[0].onerror({ message: 'one' });
+  stubs[0].onerror({ message: 'again from the dead worker' });
+  const b = e.search({}, { playouts: 10 });
+  stubs[1].onerror({ message: 'two' });
+  assert.deepEqual([await a, await b], [null, null]);
+  assert.deepEqual(errors, ['one', 'two']);
+  assert.equal(e.busy, false);
+  assert.equal(stubs.length, 2, 'one new worker per search asked for, no more');
+  Engine.onError = null;
+});
+
+test('EnginePool: each engine recovers by itself', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  Engine.onError = null;
+  const pool = new EnginePool('t', 2);
+  stubs[0].onerror({ message: 'boom' });
+  const p = pool.search({}, { playouts: 100 });
+  assert.equal(stubs.length, 3, 'only the broken engine gets a new worker');
+  done(stubs[2], result(50));
+  done(stubs[1], result(50));
+  assert.equal((await p).playouts, 100);
 });
