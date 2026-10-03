@@ -10,12 +10,15 @@ import { BoardView } from './view.js';
 import { linkPoints, pointReadout, movePhrase, plainText, positionPhrase, resultPhrase } from './access.js';
 import { initAnnouncer, announce, speak, hush, setSpeech, repeatLast, speechAvailable } from './announce.js';
 import { renderGraph } from './graph.js';
+import { safeStorage } from './storage.js';
 import { stoneSound, playSound, setSoundEnabled, SOUNDS, ZZFXSound } from './sound.js';
 
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const STORE = 'goYomi.v1';
 const OLD_STORE = 'goDojo.v1'; // autosaves from before the rename
+// Every save and load goes through this: in memory when the browser's storage is blocked.
+const storage = safeStorage(() => localStorage);
 
 const TOGGLES = [
   ['liberties', 'Liberties', 'Number of liberties (empty neighbours) of each group. 1 means atari.', 'L'],
@@ -1328,20 +1331,38 @@ function renderStatus() {
 const pathOf = node => { const p = []; for (let n = node; n.parent; n = n.parent) p.unshift(n.parent.children.indexOf(n)); return p; };
 
 function save() {
+  let written = false;
   try {
     // Every counted position keeps the player's dead/alive marks.
     const dead = [];
     const walk = n => { if (n.scoredDead) dead.push({ path: pathOf(n), points: [...n.scoredDead] }); n.children.forEach(walk); };
     walk(game.root);
     // No names: only a loaded record's own names are kept (Save SGF names the players).
-    localStorage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF({ black: '', white: '' }), path: pathOf(game.current), resigned, dead,
+    storage.setItem(STORE, JSON.stringify({ settings, sgf: game.toSGF({ black: '', white: '' }), path: pathOf(game.current), resigned, dead,
       scoring: mode === 'score' && scoring ? pathOf(scoring.node) : null }));
-  } catch { /* storage unavailable */ }
+    written = true;
+  } catch { /* storage full or refused: said by kept() */ }
+  kept(written);
+}
+
+// The game is saved by itself; when that stops working (storage blocked,
+// full, or refusing writes) a line under Save SGF says so, and goes when a
+// later save works. written: the save just made went through.
+const NOT_SAVED = 'Your game is not being saved in this browser. Use Save SGF to keep it.';
+let notSaved = false;
+function kept(written) {
+  const failing = !(written && storage.durable);
+  if (failing === notSaved) return;
+  notSaved = failing;
+  const note = $('#saveNote');
+  note.hidden = !notSaved;
+  note.textContent = notSaved ? NOT_SAVED : '';
+  if (notSaved) flash(NOT_SAVED);
 }
 
 function load() {
   try {
-    const d = JSON.parse(localStorage.getItem(STORE) || localStorage.getItem(OLD_STORE));
+    const d = JSON.parse(storage.getItem(STORE) || storage.getItem(OLD_STORE));
     if (!d) return false;
     settings = { ...structuredClone(DEFAULTS), ...d.settings, show: { ...DEFAULTS.show, ...(d.settings && d.settings.show) } };
     settings.level = Math.min(LEVELS.length - 1, Math.max(0, settings.level | 0));
@@ -1611,6 +1632,9 @@ window.dojo = {
   get mode() { return mode; },
   get scoring() { return scoring; },
   get aiThinking() { return !!aiNode; },
+  // Saving: the page's storage (tests can make its writes fail) and whether the not-saved line is up.
+  get storage() { return storage; },
+  get notSaved() { return notSaved; },
   // The Try preview: on, and kept on by a first click (armed).
   get preview() { return { on: !!peek, armed: !!armed }; },
   render, aiMove,
