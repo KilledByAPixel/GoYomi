@@ -6,6 +6,8 @@ happened, and shows you what it would have played.
 
 ## ▶ [Play GoYomi in your browser](https://killedbyapixel.github.io/GoYomi/)
 
+🎬 [Watch the trailer](https://www.youtube.com/watch?v=wnoOzaIg9Cs)
+
 ![GoYomi: a game in progress with the coach panel and game graph](social.png)
 
 ## What you get
