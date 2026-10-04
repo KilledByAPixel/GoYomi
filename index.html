@@ -151,11 +151,11 @@
       <details open>
         <summary>The rules in one minute</summary>
         <p>Players take turns placing a stone on an empty intersection. Stones never move.</p>
-        <p><b>Liberties</b> are the empty points right next to a group (up, down, left, right). Stones touching in a line share liberties.</p>
+        <p><b>Liberties</b> are the empty points right next to a group (up, down, left, right). Stones next to each other in a line form one group and share liberties; stones touching only diagonally are not connected.</p>
         <p><b>Capture:</b> fill a group's last liberty and it's removed. A group with one liberty left is in <b>atari</b>.</p>
         <p><b>No suicide:</b> you can't play where your stone would have no liberties, unless that move captures.</p>
         <p><b>Ko:</b> if you just captured one stone, your opponent can't immediately recapture in a way that repeats the board. They must play elsewhere first.</p>
-        <p><b>End:</b> when both players pass in a row. Your score is your stones plus the empty points only you surround. White gets <b>komi</b> for moving second.</p>
+        <p><b>End:</b> when both players pass in a row. The coach marks the dead stones (click a group if you disagree), then counts: your score is your stones plus the empty points only you surround. This is Chinese (area) counting. White gets <b>komi</b> for moving second.</p>
       </details>
       <details>
         <summary>Life and death</summary>
@@ -166,18 +166,22 @@
       <details>
         <summary>Tips for 9×9</summary>
         <ul>
-          <li>Start in the centre (E5) or on the 3-3 / 3-4 points (C3, G7…). First-line moves are small early on.</li>
+          <li>Start in the centre (E5) or on the 3-3 / 3-4 points (C3, C4, G7…). First-line moves are small early on.</li>
           <li>Stay connected. On a small board, cut-apart groups die fast.</li>
           <li>Before each move, look for groups in <b>atari</b> (yours and theirs).</li>
           <li>Don't chase stones you can't capture. Build territory while you attack.</li>
           <li>Capturing is nice, but the winner is whoever surrounds more area.</li>
+          <li>When in doubt, defend. With Chinese counting an extra stone inside your own area costs nothing, so make sure your groups are safe before you pass.</li>
+          <li>Pass only when no move gains anything: fill the neutral points between your area and your opponent's first, as each is worth a point. The coach warns you if you pass too early.</li>
           <li>Unsure? Hover a point: the preview shows captures, ataris and your stone's liberties.</li>
+          <li>Stuck? Press <b>Hint</b> for the coach's best moves, or <b>Their idea</b> to see what your opponent is planning.</li>
         </ul>
       </details>
       <details>
         <summary>Keyboard</summary>
         <p><kbd>←</kbd>/<kbd>→</kbd> step · <kbd>Home</kbd>/<kbd>End</kbd> start/latest (on the board or its buttons) · <kbd>U</kbd> take back · <kbd>H</kbd> hint · <kbd>O</kbd> their idea · <kbd>P</kbd> pass · <kbd>Esc</kbd> clear markers<br>
-        <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers<br><kbd>Tab</kbd> to the board, then <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move · <kbd>Enter</kbd> play · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> step · <kbd>S</kbd> speech · <kbd>R</kbd> repeat</p>
+        <kbd>L</kbd> liberties · <kbd>A</kbd> atari · <kbd>T</kbd> territory · <kbd>V</kbd> preview · <kbd>G</kbd> grades · <kbd>B</kbd> best moves · <kbd>N</kbd> numbers<br><kbd>Tab</kbd> to the board, then <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move · <kbd>Enter</kbd> play · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> step · <kbd>S</kbd> speech · <kbd>R</kbd> repeat<br>
+        The letter keys can be turned off in Settings (Single-key shortcuts).</p>
       </details>
     </section>
 
