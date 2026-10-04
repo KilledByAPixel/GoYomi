@@ -261,12 +261,14 @@ function onClick(p) {
   if (swallowClick) { swallowClick = false; return; }
   if (armed) { disarm(); return; } // (keyboard) the board only ends the preview
   if (mode === 'score') { toggleDead(p); return; }
-  if (resigned) { flash('You resigned. Take back to keep playing, or start a new game.'); return; }
   if (aiNode) { flash('Hold on, the AI is thinking…'); return; }
   const node = game.current;
   if (game.isOver(node)) { flash('Both players passed. The game is over.'); return; }
+  // After resigning the game is over: moves explore it, for either side, and the AI stays quiet.
+  // Earlier in the game, where the AI moved next, you can try a move for it too; only
+  // the end of the line waits for the AI.
   const ai = aiColor();
-  if (ai && node.board.toPlay === ai) {
+  if (ai && !resigned && node.board.toPlay === ai && !node.children.length) {
     flash('It\'s the AI\'s turn in this position. Press "AI move" to let it play, or step back.');
     return;
   }
@@ -1259,7 +1261,7 @@ function renderScorePanel() {
   el.hidden = false;
   if (resigned && !scoring) {
     setHTML(el, `<h2>${colorName(resigned)} resigned</h2><p class="big">${resigned === settings.human ? 'The AI wins this one.' : 'You win!'}</p>${nextGameNote(resigned === BLACK ? -99 : 99)}${keyMomentsHtml()}
-      <div class="fb-actions"><button data-act="new" class="primary">New game</button></div>`);
+      <div class="fb-actions"><button data-act="review">Review the game</button><button data-act="save">Save SGF</button><button data-act="new" class="primary">New game</button></div>`);
   } else if (scoring.pending) {
     setHTML(el, '<h2>Counting…</h2><p class="muted">The coach is working out which stones are dead.</p>');
   } else {
@@ -1278,7 +1280,7 @@ function renderScorePanel() {
       </table>
       <p class="muted">Area scoring (Chinese rules). Counting territory + prisoners instead (Japanese style) gives ${tm === 0 ? 'a draw' : (tm > 0 ? 'B+' : 'W+') + Math.abs(tm)}.</p>
       <p class="muted">Squares show who owns each point. Don't agree about a dead group? Click it to switch between dead and alive.</p>
-      <div class="fb-actions"><button data-act="resume">Resume play</button><button data-act="review">Review the game</button><button data-act="new" class="primary">New game</button></div>`);
+      <div class="fb-actions"><button data-act="resume">Resume play</button><button data-act="review">Review the game</button><button data-act="save">Save SGF</button><button data-act="new" class="primary">New game</button></div>`);
   }
   el.onclick = e => {
     const act = e.target.dataset && e.target.dataset.act;
@@ -1286,9 +1288,21 @@ function renderScorePanel() {
     const node = moment && game.line().find(n => n.id === +moment.dataset.id);
     if (node) { goTo(node); return; }
     if (act === 'resume') resumeFromScoring();
-    if (act === 'review') { exitScoring(); goTo(game.root); flash('Review: step through with ◀ ▶ or click the graph. Dots mark mistakes.'); }
+    if (act === 'review') {
+      exitScoring(); goTo(game.root);
+      flash(`Review: step through with ◀ ▶ or click the graph. Dots mark mistakes. Click the board to try other moves${resigned ? ' for either side' : ''}.`);
+    }
+    if (act === 'save') exportSGF();
     if (act === 'new') openNewGame();
   };
+}
+
+// For a node off the main line (each node's first child, from the start): the
+// main line's move where this line first left it. Null on the main line.
+function mainLineReturn(node) {
+  let fork = null;
+  for (let n = node; n.parent; n = n.parent) if (n.parent.children[0] !== n) fork = n.parent;
+  return fork && fork.children[0];
 }
 
 function renderNav() {
@@ -1317,11 +1331,15 @@ function renderNav() {
     html += `<span class="muted">Continue with:</span>` + node.children.map(s =>
       `<button class="chip" data-id="${s.id}">${ptName(s.move)}</button>`).join('');
   }
+  // Off the main line (the game as first played, ★): one click back to the
+  // main line's move where this line left it.
+  const back = mainLineReturn(node);
+  if (back) html += `<button class="chip" data-id="${back.id}">↩ Back to main line (move ${back.depth})</button>`;
   const v = $('#variations');
   setHTML(v, html);
   v.onclick = e => {
     const id = +(e.target.dataset && e.target.dataset.id);
-    const target = [...sibs, ...node.children].find(n => n.id === id);
+    const target = [...sibs, ...node.children, ...(back ? [back] : [])].find(n => n.id === id);
     if (target) goTo(target);
   };
 }
