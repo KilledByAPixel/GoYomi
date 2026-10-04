@@ -1,41 +1,55 @@
-# Publishes the game to GitHub Pages on every push to master: runs the tests,
-# builds the site with tools/build.js (bundled code, every file stamped with a
-# version), and deploys it. Needs Settings > Pages > Source: "GitHub Actions".
+# Tests and builds every push and pull request; publishes the game to GitHub
+# Pages on a push to master: runs the tests, builds the site with
+# tools/build.js (bundled code, every file stamped with a version), and
+# deploys it. Needs Settings > Pages > Source: "GitHub Actions".
+#
+# The build job (which runs npm's install scripts) can only read the repo; only
+# the deploy job, which runs no project code, can write to Pages. Actions are
+# pinned to a commit (the release named beside it), so a moved tag can't change
+# what runs.
 name: Publish to GitHub Pages
 
 on:
   push:
     branches: [master]
+  pull_request:
   workflow_dispatch: # a "Run workflow" button on the Actions tab
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# One publish at a time; a newer push waits rather than cancelling one in progress.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm test
       - run: node tools/build.js --no-zip
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # One publish at a time; a newer push waits rather than cancelling one in progress.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
