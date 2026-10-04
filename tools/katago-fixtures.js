@@ -30,7 +30,25 @@ proc.stdout.on('data', d => {
     reply.startsWith('=') ? w.resolve(reply.slice(1).trim()) : w.reject(new Error(`${w.cmd}: ${reply}`));
   }
 });
-const send = cmd => new Promise((resolve, reject) => { waiting.push({ cmd, resolve, reject }); proc.stdin.write(cmd + '\n'); });
+// KataGo logs to stderr: read it all (a full pipe would stall KataGo), keeping
+// the end for the error if it stops.
+let log = '';
+proc.stderr.setEncoding('utf8');
+proc.stderr.on('data', d => { log = (log + d).slice(-4000); });
+// If KataGo can't start or exits early, every command still waiting fails instead of hanging.
+let gone = null;
+const abort = why => {
+  gone = gone || why;
+  for (const w of waiting.splice(0)) w.reject(new Error(`${w.cmd}: ${gone}\n${log.trim()}`));
+};
+proc.on('error', err => abort(`could not run ${KATA}: ${err.message}`));
+// 'close', not 'exit': it comes after the last of KataGo's output has been read.
+proc.on('close', (code, signal) => abort(`KataGo exited (${signal || `code ${code}`})`));
+proc.stdin.on('error', () => {}); // writing after it exited: reported by 'close'
+const send = cmd => new Promise((resolve, reject) => {
+  waiting.push({ cmd, resolve, reject });
+  if (gone) abort(gone); else proc.stdin.write(cmd + '\n');
+});
 
 // kata-raw-nn prints "name value" lines, and grids after "policy" / "whiteOwnership".
 function parseRaw(text) {

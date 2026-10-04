@@ -38,13 +38,14 @@ async function load(only) {
     if (!await tf.setBackend(b)) return null;
     await tf.ready();
     const gpu = b === 'webgpu' || b === 'webgl', batch = gpu ? 16 : 4;
-    const net = new Net(tf, parsed);
-    // On a GPU every run is one size, so its programs are built once, here in the warm-up.
-    if (gpu) net.fixedBatch = batch;
+    let net = null;
     try {
+      net = new Net(tf, parsed);   // gives back what it made if it fails partway
+      // On a GPU every run is one size, so its programs are built once, here in the warm-up.
+      if (gpu) net.fixedBatch = batch;
       const rate = await benchmark(net, batch);
       return { backend: b, net, rate, batch, gpu, dispose: () => net.dispose() };
-    } catch (err) { net.dispose(); throw err; }
+    } catch (err) { if (net) net.dispose(); throw err; }
   });
   if (!best) throw new Error('no TensorFlow.js backend works here');
   if (!await tf.setBackend(best.backend)) throw new Error(`can't switch back to ${best.backend}`);
@@ -75,8 +76,27 @@ const sched = new Scheduler({ post: m => postMessage(m), yieldFn: tick });
 // still waiting for the network to load.
 const current = new Map();
 
-self.onmessage = async e => {
+// A throw while handling a message would be an unhandled rejection, which the
+// page never sees: the search would wait for the stall watchdog, which then
+// gives up on KataGo for the session. Instead that search ends with no results,
+// and a load that breaks this way fails like any other (load() itself reports
+// its failures as 'failed' through `loading`).
+self.onmessage = e => {
   const msg = e.data;
+  handle(msg).catch(err => {
+    console.warn('KataGo: a request failed', err, msg);
+    if (msg.type === 'search') postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null });
+    else if (msg.type === 'load') postMessage({ type: 'failed', message: String(err && err.message || err) });
+  });
+};
+// Anything else that slips through is at least reported.
+self.addEventListener('unhandledrejection', e => {
+  const r = e.reason;
+  console.error('KataGo worker: unhandled rejection', r);
+  postMessage({ type: 'error', message: String(r && r.message || r) });
+});
+
+async function handle(msg) {
   if (msg.type === 'load' || !loading) {
     loading = loading || load(msg.backend).then(
       info => { postMessage({ type: 'ready', ...info }); return true; },
@@ -90,16 +110,9 @@ self.onmessage = async e => {
   if (!await loading) { postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null }); return; }
   if (current.get(msg.engine) !== req) return;   // stopped or replaced while loading
   const ev = sched.evaluator;
-  // A position that can't be built (a move onto a stone, say) gets an empty
-  // answer at once: the job mustn't vanish unanswered or loop forever.
-  let search;
-  try {
-    search = new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch });
-  } catch (err) {
-    console.warn('KataGo: a position it cannot read', err && err.message, msg.position);
-    postMessage({ type: 'done', engine: msg.engine, id: msg.id, results: null });
-    return;
-  }
+  // A position that can't be built (a move onto a stone, say) throws here and
+  // gets an empty answer at once (see onmessage): it mustn't vanish unanswered.
+  const search = new KataSearch(buildPosition(msg.position), { komi: msg.position.komi, evaluator: ev, batch: ev.maxBatch });
   sched.add({
     engine: msg.engine, id: msg.id, priority: msg.priority || 0,
     search,
@@ -109,4 +122,4 @@ self.onmessage = async e => {
     reportMs: msg.reportMs ?? 250,
     started: performance.now(), lastReport: 0,
   });
-};
+}

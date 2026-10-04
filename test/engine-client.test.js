@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 const stubs = [];
 globalThis.Worker = class { constructor() { stubs.push(this); } postMessage(m) { if (m.type === 'search') this.sent = m; } terminate() { this.terminated = true; } };
 const { Engine, EnginePool, KataWorker, KataEngine } = await import('../src/engine-client.js');
+const { parsePt, BLACK, WHITE } = await import('../src/board.js');
 
 const result = playouts => ({ toPlay: 1, playouts, blackWinrate: 0.5, score: 1, ownership: new Array(81).fill(0),
   moves: [{ move: 40, visits: playouts, winrate: 0.5, score: 1, prior: 1, pv: [] }] });
@@ -48,16 +49,25 @@ test('EnginePool: finished workers merge as before', async () => {
   assert.equal((await p).playouts, 100);
 });
 
+// The built-in engine's worker, run in-process; the tests deliver its step
+// messages by hand (and leave none queued).
+let ew = null;
+async function engineWorker() {
+  if (!ew) {
+    ew = { queued: [], posted: [], send: data => self.onmessage({ data }) };
+    globalThis.MessageChannel = class { constructor() { this.port1 = ew.port1 = {}; this.port2 = { postMessage: () => ew.queued.push(0) }; } };
+    globalThis.self = {};
+    globalThis.postMessage = m => ew.posted.push(m);
+    await import('../src/engine-worker.js');
+  }
+  ew.posted.length = 0;
+  return ew;
+}
+const emptyBoard = { setup: [], moves: [], whiteFirst: false, komi: 7 };
+
 test('engine worker: a new search with a step still queued runs one loop', async () => {
-  // Run the worker in-process; the test delivers its step messages by hand.
-  let port1;
-  const queued = [], posted = [];
-  globalThis.MessageChannel = class { constructor() { this.port1 = port1 = {}; this.port2 = { postMessage: () => queued.push(0) }; } };
-  globalThis.self = {};
-  globalThis.postMessage = m => posted.push(m);
-  await import('../src/engine-worker.js');
-  const position = { setup: [], moves: [], whiteFirst: false, komi: 7 };
-  const send = data => self.onmessage({ data });
+  const { queued, posted, port1, send } = await engineWorker();
+  const position = emptyBoard;
   send({ type: 'search', id: 1, position, playouts: 500, reportMs: 0 });
   send({ type: 'stop' });
   send({ type: 'search', id: 2, position, playouts: 500, reportMs: 0 });
@@ -69,6 +79,70 @@ test('engine worker: a new search with a step still queued runs one loop', async
   }
   assert.deepEqual(posted.map(m => m.type + m.id), ['done2']);
   assert.equal(posted[0].results.playouts, 500);
+});
+
+test('engine worker: a position it can\'t build ends that search empty; the next one runs', async () => {
+  const { queued, posted, port1, send } = await engineWorker();
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const E5 = parsePt('E5'), C3 = parsePt('C3');
+    send({ type: 'search', id: 3, position: { ...emptyBoard, moves: [[E5, BLACK], [C3, WHITE], [E5, BLACK]] }, playouts: 100, reportMs: 0 });
+  } finally { console.warn = warn; }
+  assert.deepEqual(posted, [{ type: 'done', id: 3, results: null }]);
+  assert.equal(queued.length, 0, 'nothing left running');
+  send({ type: 'search', id: 4, position: emptyBoard, playouts: 300, reportMs: 0 });
+  while (queued.length) { queued.pop(); port1.onmessage(); }
+  assert.deepEqual(posted.map(m => m.type + m.id), ['done3', 'done4']);
+  assert.equal(posted[1].results.playouts, 300);
+});
+
+test('Engine: a done with no results settles with null, and without a last progress call', { timeout: 2000 }, async () => {
+  stubs.length = 0;
+  const calls = [];
+  const e = new Engine('t');
+  const p = e.search({}, { onProgress: (...a) => calls.push(a) });
+  done(stubs[0], null);
+  assert.equal(await p, null);
+  assert.deepEqual(calls, []);
+});
+
+// Throws from the UI's last progress call, as a bug in it would; returns what got logged.
+const brokenUI = (res, fin) => { if (fin) throw new Error('UI bug'); };
+async function logged(run) {
+  const errors = [], error = console.error;
+  console.error = (...a) => errors.push(a.join(' '));
+  try { await run(); } finally { console.error = error; }
+  return errors;
+}
+
+test('Engine, KataEngine and EnginePool: a progress callback that throws still settles the search', { timeout: 2000 }, async () => {
+  const errors = await logged(async () => {
+    stubs.length = 0;
+    const e = new Engine('t');
+    const p = e.search({}, { onProgress: brokenUI });
+    done(stubs[0], result(10));
+    assert.equal((await p).playouts, 10);
+    assert.equal(e.busy, false);
+
+    stubs.length = 0;
+    const pool = new EnginePool('t', 2);
+    const q = pool.search({}, { playouts: 100, onProgress: brokenUI });
+    done(stubs[0], result(50));
+    done(stubs[1], result(50));
+    assert.equal((await q).playouts, 100);
+    assert.equal(pool.busy, false);
+
+    const { host, w } = await startedHost();
+    const k = new KataEngine('kopponent', host);
+    const r = k.search({}, { visits: 12, onProgress: brokenUI });
+    w.onmessage({ data: { type: 'done', engine: 'kopponent', id: w.sent.id, results: result(12) } });
+    assert.equal((await r).playouts, 12);
+    assert.equal(k.busy, false);
+    host.fail('test over');
+  });
+  assert.equal(errors.length, 3);
+  assert.ok(errors.every(m => /UI bug/.test(m)), 'the bug still shows');
 });
 
 // KataGo's shared worker, once it has started.
@@ -175,6 +249,18 @@ test('KataWorker: a busy network that keeps answering, and an idle one, are left
   await wait(800); // nothing pending: silence (longer than the limit) is fine
   assert.deepEqual(failures, []);
   assert.equal(host.dead, false);
+  host.fail('test over');
+});
+
+test('KataWorker: a long read with no progress reports is kept alive by the heartbeat', { timeout: 3000 }, async () => {
+  const { host, failures, w } = await stallHost(300);
+  const eng = new KataEngine('kcoach0', host);
+  const p = eng.search({}, { visits: 400, reportMs: 0 });
+  for (let i = 0; i < 8; i++) { await wait(100); w.onmessage({ data: { type: 'alive' } }); }
+  assert.deepEqual(failures, [], 'not taken for a hang');
+  assert.equal(eng.busy, true, 'the heartbeat is heard, nothing more');
+  w.onmessage({ data: { type: 'done', engine: 'kcoach0', id: w.sent.id, results: result(400) } });
+  assert.ok(await p);
   host.fail('test over');
 });
 

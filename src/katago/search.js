@@ -109,7 +109,8 @@ export class KataSearch {
       path.push(child);
       child.vl++;
       node = child;
-      if (!node.kids && b.passes >= 2) node.terminal = this.finish(b, path[path.length - 2]);
+      // A finished game never gets kids: count it on the first visit only.
+      if (!node.kids && !node.terminal && b.passes >= 2) node.terminal = this.finish(b, path[path.length - 2]);
     }
     if (node.terminal || node.pending) return { path, leaf: node, pos: null };
     const { legal, banned } = this.legalMoves(b, hashes);
@@ -295,10 +296,5 @@ export class KataSearch {
         ...(this.twins.has(m) && { twins: this.twins.get(m) }),
       })) : [],
     };
-  }
-
-  bestMove() {
-    const m = this.results(1).moves[0];
-    return m ? m.move : PASS;
   }
 }

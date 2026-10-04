@@ -59,14 +59,18 @@ export class Parser {
     this.i += 5;
     return true;
   }
+  // A truncated file fails here, as it's read, not later when the net is built.
+  need(n) { if (this.i + n > this.data.length) throw new Error('Unexpected end of network file'); }
   floats(count) {
     this.skip();
     let a;
     if (this.marker('@BIN@')) {
+      this.need(count * 4);
       const bytes = this.data.slice(this.i, this.i + count * 4);
       this.i += count * 4;
       a = new Float32Array(bytes.buffer);
     } else if (this.marker('@F16@')) {
+      this.need(count * 2);
       const dv = new DataView(this.data.buffer, this.data.byteOffset + this.i, count * 2);
       this.i += count * 2;
       a = new Float32Array(count);
@@ -169,6 +173,9 @@ export function parseModel(bytes, record = false) {
   const value = { v1: conv(p), v1BN: batchNorm(p), v1Act: activation(p, version),
     v2: matmul(p), v2Bias: matbias(p), v2Act: activation(p, version),
     v3: matmul(p), v3Bias: matbias(p), sv3: matmul(p), sv3Bias: matbias(p), ownership: conv(p) };
+  // Anything left over means the layout was misread somewhere (or two files were joined).
+  p.skip();
+  if (p.i < p.data.length) throw new Error('Unexpected data after the end of the network file');
   return { name, version, post, trunk, policy, value, bytes: record ? p.bytes() : null };
 }
 
@@ -195,9 +202,12 @@ export class Net {
       for (const [k, v] of Object.entries(x)) out[k] = make(v);
       return out;
     };
-    this.trunk = make(parsed.trunk);
-    this.policy = make(parsed.policy);
-    this.value = make(parsed.value);
+    // A backend that fails partway (out of GPU memory, say) mustn't keep what it made.
+    try {
+      this.trunk = make(parsed.trunk);
+      this.policy = make(parsed.policy);
+      this.value = make(parsed.value);
+    } catch (err) { this.dispose(); throw err; }
   }
 
   act(x, kind) {
@@ -261,15 +271,16 @@ export class Net {
   async evaluate(spatial, global, n) {
     const tf = this.tf;
     const rows = Math.max(n, Math.min(this.fixedBatch || 0, spatial.length / (AREA * SPATIAL)));
-    const s = tf.tensor4d(spatial.subarray(0, rows * AREA * SPATIAL), [rows, 9, 9, SPATIAL]);
-    const g = tf.tensor2d(global.subarray(0, rows * GLOBAL), [rows, GLOBAL]);
-    let out = null, data;
-    // Disposed however the run ends: a failing backend mustn't leak GPU memory too.
+    let s = null, g = null, out = null, data;
+    // Disposed however the run ends, even partway through making the inputs:
+    // a failing backend mustn't leak GPU memory too.
     try {
+      s = tf.tensor4d(spatial.subarray(0, rows * AREA * SPATIAL), [rows, 9, 9, SPATIAL]);
+      g = tf.tensor2d(global.subarray(0, rows * GLOBAL), [rows, GLOBAL]);
       out = this.forward(s, g);
       data = await out.data();
     } finally {
-      tf.dispose(out ? [s, g, out] : [s, g]);
+      tf.dispose([s, g, out].filter(Boolean));
     }
     const w = AREA + 1 + 3 + this.scoreChannels + AREA, res = [];
     for (let i = 0; i < n; i++) res.push(this.decode(data.subarray(i * w, (i + 1) * w)));

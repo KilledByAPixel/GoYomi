@@ -55,12 +55,17 @@ export class Engine {
     const job = this.pending;
     if (!job || msg.id !== job.id) return;
     if (msg.type === 'progress') { if (job.onProgress) job.onProgress(msg.results); return; }
-    if (msg.type === 'done') {
-      this.pending = null;
-      if (job.onProgress) job.onProgress(msg.results, true);
-      job.resolve(msg.results);
-    }
+    if (msg.type === 'done') { this.pending = null; settle(job, msg.results); }
   }
+}
+
+// Ends a job: its last progress call, then its promise. Settled even when the
+// callback throws (a UI bug), or the caller would wait forever; the bug is
+// logged, as it would be uncaught.
+function settle(job, results) {
+  try { if (job.onProgress && results) job.onProgress(results, true); }
+  catch (err) { console.error('search progress callback failed', err); }
+  job.resolve(results);
 }
 
 // Combines root results from independent searches of the same position
@@ -124,9 +129,7 @@ export class EnginePool {
         if (!live()) return;
         this.pending = null;
         const ok = results.filter(Boolean);
-        const merged = ok.length ? mergeResults(ok) : null;
-        if (merged && onProgress) onProgress(merged, true);
-        resolve(merged);
+        settle({ resolve, onProgress }, ok.length ? mergeResults(ok) : null);
       });
     });
   }
@@ -161,7 +164,8 @@ export class KataWorker {
   // startupMs: how long loading may take (a stalled download or GPU set-up) before giving up.
   // stallMs: how long the network may stay silent with a search waiting (a lost GPU
   // context can leave a run that never ends) before KataGo counts as failed. The
-  // longest silence in normal play is the AI's move, at most 15 s.
+  // worker's heartbeat keeps searches that report nothing from looking silent,
+  // so in normal play the longest silence is one network run.
   constructor({ startupMs = 60000, stallMs = 30000 } = {}) {
     this.worker = new Worker(new URL('./katago-worker.js', import.meta.url), { type: 'module' });
     this.engines = new Map();
@@ -170,7 +174,9 @@ export class KataWorker {
     this.onFail = null;      // called when KataGo stops working after it had started
     this.startupMs = startupMs;
     this.stallMs = stallMs;
-    this.heard = 0;          // when the worker last said anything, or last got work while idle
+    // When the worker last said anything (it sends a heartbeat while searching,
+    // even for reads that report no progress), or last got work while idle.
+    this.heard = 0;
     this.ready = new Promise(resolve => { this.resolveReady = resolve; });
     this.worker.onmessage = e => {
       const msg = e.data;
@@ -187,6 +193,8 @@ export class KataWorker {
         return;
       }
       if (msg.type === 'failed' || msg.type === 'fatal') { this.fail(msg.message); return; }
+      if (msg.type === 'alive') return;   // the heartbeat: heard, nothing more
+      if (msg.type === 'error') { console.warn('KataGo worker:', msg.message); return; }
       const eng = this.engines.get(msg.engine);
       if (eng) eng.onMessage(msg);
     };
@@ -270,11 +278,7 @@ export class KataEngine {
     const job = this.pending;
     if (!job || msg.id !== job.id) return;
     if (msg.type === 'progress') { if (job.onProgress) job.onProgress(msg.results); return; }
-    if (msg.type === 'done') {
-      this.pending = null;
-      if (job.onProgress && msg.results) job.onProgress(msg.results, true);
-      job.resolve(msg.results);
-    }
+    if (msg.type === 'done') { this.pending = null; settle(job, msg.results); }
   }
 }
 

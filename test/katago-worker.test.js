@@ -1,8 +1,11 @@
 // The KataGo worker's scheduling and backend choice, with fake networks and searches.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { register } from 'node:module';
 import { Scheduler } from '../src/katago/scheduler.js';
 import { chooseBackend } from '../src/katago/backends.js';
+import { parsePt, BLACK, WHITE } from '../src/board.js';
 
 // A search that just counts the leaves it's given.
 const fakeSearch = owner => ({ playouts: 0, gather(n) { return Array.from({ length: n }, () => ({ pos: { owner } })); },
@@ -31,6 +34,36 @@ test('Scheduler: a failed network ends every search and reports it, instead of s
   s.add(job('kscout', 50));
   await idle(s);
   assert.deepEqual(posted, [{ type: 'done', engine: 'kscout', id: 1, results: null }]);
+});
+
+test('Scheduler: a search that throws ends alone; the network and the other searches go on', async () => {
+  const { s, posted } = setup(async ps => ps.map(() => ({})));
+  const badApply = job('kcoach0', 20), badGather = job('kcoach1', 20), badResults = job('kcoach2', 20);
+  badApply.search.apply = () => { throw new Error('odd position'); };
+  badGather.search.gather = () => { throw new Error('odd position'); };
+  badResults.search.results = () => { throw new Error('odd position'); };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    for (const j of [badApply, badGather, badResults, job('kcoach3', 20)]) s.add(j);
+    await idle(s);
+  } finally { console.warn = warn; }
+  const ends = posted.filter(m => m.type === 'done').map(m => [m.engine, m.results && m.results.playouts]).sort();
+  assert.deepEqual(ends, [['kcoach0', null], ['kcoach1', null], ['kcoach2', null], ['kcoach3', 20]]);
+  assert.equal(posted.some(m => m.type === 'fatal'), false, 'not taken for a dead network');
+  assert.equal(s.broken, null);
+  s.add(job('kscout', 8));
+  await idle(s);
+  assert.equal(posted.find(m => m.type === 'done' && m.engine === 'kscout').results.playouts, 8, 'later searches still run');
+});
+
+test('Scheduler: a long read that reports nothing still sends a heartbeat', async () => {
+  const { s, posted } = clocked({ ms: () => 1500 });
+  s.add({ ...job('kopponent', 40, 1), started: 0 });   // 10 rounds of 1.5 s, no progress reports
+  await idle(s);
+  // At most one per 2 s, so here every second round: well inside the page's 30 s limit, and cheap.
+  assert.equal(posted.filter(m => m.type === 'alive').length, 5, 'heartbeats in 15 s');
+  assert.equal(posted.filter(m => m.type === 'progress').length, 0);
 });
 
 test('Scheduler: the AI\'s move goes first; background reads wait for it', async () => {
@@ -117,4 +150,43 @@ test('Scheduler: a coach read arriving while the AI\'s evaluation runs keeps its
   s.add({ ...job('kopponent', 60, 1), started: 0 });
   await idle(s);
   assert.equal(posted.find(m => m.engine === 'kcoach0').results.playouts, 8, 'the coach got its whole read after the AI finished');
+});
+
+// The worker itself, run in-process. Its TensorFlow.js is a stand-in
+// (fake-tf.js: zeros out), so this tests the message handling, not the net.
+async function kataWorker() {
+  const fake = new URL('./fake-tf.js', import.meta.url).href;
+  register('data:text/javascript,' + encodeURIComponent(
+    `export async function resolve(s, c, next) { return s.endsWith('/vendor/tf.js') ? { url: ${JSON.stringify(fake)}, shortCircuit: true } : next(s, c); }`));
+  const bytes = readFileSync(new URL('../nets/b6c96.bin', import.meta.url));
+  globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) });
+  const posted = [];
+  globalThis.self = { addEventListener() {} };
+  globalThis.postMessage = m => posted.push(m);
+  globalThis.MessageChannel = class { constructor() { const port1 = this.port1 = {}; this.port2 = { postMessage: () => setImmediate(() => port1.onmessage()) }; } };
+  await import('../src/katago-worker.js');
+  const until = async pred => { for (;;) { const m = posted.find(pred); if (m) return m; await new Promise(r => setTimeout(r, 5)); } };
+  return { posted, send: data => self.onmessage({ data }), until };
+}
+
+test('KataGo worker: a position it can\'t read ends only that search, empty; the others run', { timeout: 20000 }, async () => {
+  const { posted, send, until } = await kataWorker();
+  send({ type: 'load', backend: 'cpu' });
+  const ready = await until(m => m.type === 'ready' || m.type === 'failed');
+  assert.equal(ready.type, 'ready', ready.message);
+  const E5 = parsePt('E5'), C3 = parsePt('C3');
+  const position = { setup: [], moves: [[E5, BLACK], [C3, WHITE]], whiteFirst: false, komi: 7 };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    send({ type: 'search', engine: 'kcoach0', id: 1, position: { ...position, moves: [...position.moves, [E5, BLACK]] }, playouts: 8 });
+    send({ type: 'search', engine: 'kscout', id: 2 });   // no position at all: a throw while handling it
+    send({ type: 'search', engine: 'kopponent', id: 3, position, playouts: 8, reportMs: 0, priority: 1 });
+    await until(m => m.type === 'done' && m.engine === 'kopponent');
+    send({ type: 'search', engine: 'kcoach0', id: 4, position, playouts: 8, reportMs: 0 });
+    await until(m => m.type === 'done' && m.id === 4);
+  } finally { console.warn = warn; }
+  const ends = posted.filter(m => m.type === 'done').map(m => [m.engine, m.id, m.results && m.results.playouts]);
+  assert.deepEqual(ends.sort(), [['kcoach0', 1, null], ['kcoach0', 4, 8], ['kopponent', 3, 8], ['kscout', 2, null]]);
+  assert.equal(posted.some(m => m.type === 'fatal' || m.type === 'failed'), false, 'KataGo itself is fine');
 });

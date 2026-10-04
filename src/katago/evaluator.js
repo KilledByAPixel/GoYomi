@@ -31,7 +31,6 @@ export class Evaluator {
     this.cache = new Map();
     this.cacheSize = cacheSize;
     this.evals = 0;       // positions actually run through the net
-    this.netMs = 0;
   }
 
   // positions: feature inputs (see fillInputs) each with a `key` for the cache.
@@ -52,9 +51,7 @@ export class Evaluator {
         const map = SYM[k], base = j * AREA * SPATIAL;
         for (let p = 0; p < AREA; p++) this.spatial.set(this.row.subarray(p * SPATIAL, (p + 1) * SPATIAL), base + map[p] * SPATIAL);
       });
-      const t0 = performance.now();
       const res = await this.net.evaluate(this.spatial, this.global, chunk.length);
-      this.netMs += performance.now() - t0;
       this.evals += chunk.length;
       chunk.forEach((i, j) => {
         const r = res[j], map = SYM[syms[j]];
@@ -63,7 +60,8 @@ export class Evaluator {
         logits[AREA] = r.policyLogits[AREA];
         out[i] = { ...r, policyLogits: logits, ownership: own };
         const key = positions[i].key;
-        if (key) {
+        // cacheSize 0 is no cache at all (the benchmark must run every position).
+        if (key && this.cacheSize > 0) {
           if (this.cache.size >= this.cacheSize) this.cache.delete(this.cache.keys().next().value);
           this.cache.set(key, out[i]);
         }
@@ -71,7 +69,4 @@ export class Evaluator {
     }
     return out;
   }
-
-  // Positions per second of net time so far.
-  get rate() { return this.netMs ? this.evals / (this.netMs / 1000) : 0; }
 }

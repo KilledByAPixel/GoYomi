@@ -18,7 +18,15 @@ self.onmessage = e => {
   const msg = e.data;
   if (msg.type === 'stop') { job = null; return; }
   if (msg.type === 'search') {
-    const { board, seen } = buildPosition(msg.position);
+    job = null;
+    let board, seen;
+    // A position that can't be built (a move onto a stone, say) ends that search
+    // with no results, instead of a throw that takes the whole worker down.
+    try { ({ board, seen } = buildPosition(msg.position)); } catch (err) {
+      console.warn('Built-in engine: a position it cannot read', err && err.message);
+      postMessage({ type: 'done', id: msg.id, results: null });
+      return;
+    }
     const tmp = new Board();
     const forbidden = p => { tmp.copyFrom(board); tmp.play(p); return seen.has(tmp.hash); };
     job = {

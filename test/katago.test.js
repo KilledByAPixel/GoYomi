@@ -171,6 +171,55 @@ test('a network output that isn\'t a number is an error, not a move', async () =
   assert.throws(() => net.decode(row), /invalid/);
 });
 
+// Stand-ins for the network: every position gets the same outputs.
+const outputs = (passLogit = 0) => ({ policyLogits: Float32Array.from({ length: 82 }, (_, i) => i === 81 ? passLogit : 0),
+  win: 0.5, loss: 0.5, noResult: 0, lead: 0, scoreMean: 0, ownership: new Float32Array(81) });
+
+test('a finished game is counted once, however often the search visits it', async () => {
+  // White has passed; the net all but insists Black passes too, ending the game.
+  const stones = [];
+  for (let y = 1; y <= 9; y++) stones.push([parsePt(`E${y}`), B], [parsePt(`F${y}`), W]);
+  const root = buildPosition({ setup: stones, moves: [[PASS, WHITE]], whiteFirst: true });
+  const evaluator = { evaluate: async ps => ps.map(() => outputs(8)) };
+  const s = new KataSearch(root, { komi: 0.5, evaluator, batch: 4 });
+  let counts = 0;
+  const finish = s.finish;
+  s.finish = (...a) => { counts++; return finish.apply(s, a); };
+  await s.run(60);
+  const terminals = [], walk = n => { if (n.terminal) terminals.push(n); if (n.kids) for (const k of n.kids) if (k) walk(k); };
+  walk(s.root);
+  const pass = s.root.kids.find(k => k && k.move === 81);
+  assert.ok(pass.terminal && pass.n > 20, `the pass that ends the game was visited ${pass.n} times`);
+  assert.equal(counts, terminals.length, 'one count per finished game');
+  assert.equal(s.results().moves[0].move, PASS);
+});
+
+test('cacheSize 0 caches nothing; the default cache answers a repeat', async () => {
+  let runs = 0;
+  const net = { evaluate: async (s, g, n) => { runs += n; return Array.from({ length: n }, () => outputs()); } };
+  const pos = new KataSearch(buildPosition({ setup: [], moves: [], whiteFirst: false }), { komi: 7, evaluator: null, batch: 1 }).gather(1)[0].pos;
+  const off = new Evaluator(net, { cacheSize: 0 });
+  await off.evaluate([pos]);
+  await off.evaluate([pos]);
+  assert.equal(runs, 2, 'both runs reach the net (the benchmark relies on this)');
+  assert.equal(off.cache.size, 0);
+  const on = new Evaluator(net);
+  await on.evaluate([pos]);
+  await on.evaluate([pos]);
+  assert.equal(runs, 3);
+});
+
+test('a network file cut short fails as it is read, with a plain message', async () => {
+  const { parseModel } = await import('../src/katago/model.js');
+  const bytes = new Uint8Array(readFileSync(new URL('../nets/b6c96.bin', import.meta.url)));
+  assert.equal(parseModel(bytes).version, 8);
+  for (const cut of [bytes.length - 100, bytes.length >> 1]) assert.throws(() => parseModel(bytes.subarray(0, cut)), /Unexpected end of network file/);
+  const extra = new Uint8Array(bytes.length + 4);
+  extra.set(bytes);
+  extra.set([0x6d, 0x6f, 0x72, 0x65], bytes.length);
+  assert.throws(() => parseModel(extra), /after the end/);
+});
+
 test('a position with a move onto a stone is refused, not built', () => {
   const recipe = { setup: [], moves: [[parsePt('E5'), BLACK], [parsePt('C3'), WHITE], [parsePt('E5'), BLACK]], whiteFirst: false };
   assert.throws(() => buildPosition(recipe), /E5 is already taken/);

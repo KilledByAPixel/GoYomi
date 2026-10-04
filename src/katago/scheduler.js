@@ -1,6 +1,11 @@
 // Serves several searches from one network (the KataGo worker's loop): each
 // round the most urgent searches fill one batch, and each gets its outputs back.
 // No DOM or TF.js here; the worker supplies the evaluator, `post` and `yieldFn`.
+
+// While searches run, the page hears from the worker at least this often, even
+// from reads that report no progress: its watchdog takes silence for a hang.
+const BEAT_MS = 2000;
+
 export class Scheduler {
   // now: the clock (tests pass a fake one).
   constructor({ post, yieldFn, now = () => performance.now() }) {
@@ -12,6 +17,7 @@ export class Scheduler {
     this.pumping = false;
     this.broken = null;        // why the network failed; then every search ends at once
     this.turn = 0;
+    this.beat = 0;             // when the last heartbeat went out
   }
 
   // job: { engine, id, search, target, maxTime, reportMs, priority, batch?, started, lastReport }
@@ -44,8 +50,13 @@ export class Scheduler {
           live = [...live.slice(s), ...live.slice(0, s)].slice(0, cap);
         }
         const share = Math.max(1, Math.floor(cap / live.length));
-        const parts = live.map(j => ({ j, sels: j.search.gather(Math.min(share, j.batch || cap, j.target - j.search.playouts)) }));
+        const parts = [];
+        for (const j of live) {
+          const sels = this.own(j, () => j.search.gather(Math.min(share, j.batch || cap, j.target - j.search.playouts)));
+          if (sels) parts.push({ j, sels });
+        }
         const all = parts.flatMap(p => p.sels);
+        // Only the network's own failure gets past here to the catch below.
         const outs = all.length ? await this.evaluator.evaluate(all.map(s => s.pos)) : [];
         let at = 0;
         const now = this.now();
@@ -54,17 +65,9 @@ export class Scheduler {
         for (const { j, sels } of parts) {
           const mine = outs.slice(at, at += sels.length);
           if (this.jobs.get(j.engine) !== j) continue;   // stopped or replaced while the net ran
-          j.search.apply(sels, mine);
-          const done = j.search.playouts >= j.target || now - j.started - (j.paused || 0) > j.maxTime;
-          if (done || (j.reportMs && now - j.lastReport > j.reportMs)) {
-            j.lastReport = now;
-            const results = j.search.results(done ? 40 : 12);
-            results.engine = 'katago';
-            if (!done) { delete results.allMoves; delete results.policy; }
-            this.post({ type: done ? 'done' : 'progress', engine: j.engine, id: j.id, results, elapsed: now - j.started });
-          }
-          if (done) this.jobs.delete(j.engine);
+          this.own(j, () => this.advance(j, sels, mine, now));
         }
+        if (now - this.beat >= BEAT_MS) { this.beat = now; this.post({ type: 'alive' }); }
         await this.yieldFn();
       }
     } catch (err) {
@@ -77,6 +80,33 @@ export class Scheduler {
       this.jobs.clear();
     } finally {
       this.pumping = false;
+    }
+  }
+
+  // The net's outputs into one job's search; reports progress, or the end.
+  advance(j, sels, outs, now) {
+    j.search.apply(sels, outs);
+    const done = j.search.playouts >= j.target || now - j.started - (j.paused || 0) > j.maxTime;
+    if (done || (j.reportMs && now - j.lastReport > j.reportMs)) {
+      j.lastReport = now;
+      const results = j.search.results(done ? 40 : 12);
+      results.engine = 'katago';
+      if (!done) { delete results.allMoves; delete results.policy; }
+      this.post({ type: done ? 'done' : 'progress', engine: j.engine, id: j.id, results, elapsed: now - j.started });
+    }
+    if (done) this.jobs.delete(j.engine);
+  }
+
+  // Runs one job's own step. A throw there is that search's bug (an odd
+  // position), not a dead network: it ends that job alone, with no results.
+  own(j, step) {
+    try { return step(); } catch (err) {
+      console.warn(`KataGo: the search for ${j.engine} failed`, err);
+      if (this.jobs.get(j.engine) === j) {
+        this.jobs.delete(j.engine);
+        this.post({ type: 'done', engine: j.engine, id: j.id, results: null });
+      }
+      return null;
     }
   }
 }
