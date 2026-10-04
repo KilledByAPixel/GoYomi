@@ -37,7 +37,7 @@ export function levelGrade(g, level, facts = []) {
   let key = SHOWN[level][g.grade];
   // Beginners learn most from lost stones, even when few points are lost.
   if (level === 'beginner' && key === 'good' && g.grade !== 'best' && g.ptLoss >= 1 && facts.some(f => f.type === 'losesStones')) key = 'mistake';
-  return { key, label: gradeLabel(key, level), color: GRADES[key].color, flagged: key !== 'best' && key !== 'good' };
+  return { key, label: gradeLabel(key, level), color: GRADES[key].color, ink: GRADES[key].ink, flagged: key !== 'best' && key !== 'good' };
 }
 
 // The sentence after the grade: how the move compares with the coach's choice.

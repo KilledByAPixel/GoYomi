@@ -13,7 +13,11 @@
   --chance: #2f7fbf;
   --shadow: 0 1px 2px rgba(60, 40, 10, .08), 0 6px 20px rgba(60, 40, 10, .07);
   color-scheme: light;
+  /* The height always visible: on phones 100vh counts the address bar too.
+     svh rather than dvh, so the board doesn't resize as the bar slides away. */
+  --vh: 100vh;
 }
+@supports (height: 100svh) { :root { --vh: 100svh; } }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1b1916;
@@ -57,7 +61,7 @@ kbd {
 .side { grid-area: side; align-self: start; }
 .more {
   grid-area: more; align-self: start; justify-self: center;
-  width: 100%; max-width: max(min(100%, calc(100vh - 170px)), 720px);
+  width: 100%; max-width: max(min(100%, calc(var(--vh) - 170px)), 720px);
   display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: start;
 }
 .more .credits { grid-column: 1 / -1; }
@@ -71,16 +75,16 @@ kbd {
 /* ---------------------------------------------------------------- board column */
 .board-col { display: flex; flex-direction: column; align-items: center; min-width: 0; }
 .topbar {
-  width: 100%; max-width: min(100%, calc(100vh - 170px)); min-width: min(100%, 420px);
+  width: 100%; max-width: min(100%, calc(var(--vh) - 170px)); min-width: min(100%, 420px);
   display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;
 }
-.brand { font-weight: 750; font-size: 20px; letter-spacing: .2px; }
+.brand { font-weight: 750; font-size: 20px; letter-spacing: .2px; margin: 0; }
 .brand span { color: var(--accent); font-weight: 600; }
 /* The coach badge: shown only by the single-column layout above, where the
    coach card is below the board (one rule, so the two can never disagree). */
 .coach-badge {
   display: none; margin-left: auto; padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: .2px;
-  background: var(--pill, #888); border-color: transparent; color: #fff;
+  background: var(--pill, #888); border-color: transparent; color: var(--pill-ink, #1d1d1d);
 }
 .coach-badge.pending { background: var(--line); color: var(--muted); }
 .coach-badge:hover:not(:disabled) { background: var(--pill, #888); filter: brightness(1.08); }
@@ -101,7 +105,7 @@ kbd {
 
 .board-wrap {
   width: 100%;
-  max-width: min(100%, calc(100vh - 170px));
+  max-width: min(100%, calc(var(--vh) - 170px));
   min-width: min(100%, 420px);
   aspect-ratio: 1;
   touch-action: manipulation;
@@ -121,7 +125,7 @@ kbd {
 
 .message {
   /* Two full lines of text (1.45 line height) plus the padding, so a message of up to two lines never moves the controls below. */
-  min-height: calc(2.9em + 8px); width: 100%; max-width: min(100%, calc(100vh - 170px));
+  min-height: calc(2.9em + 8px); width: 100%; max-width: min(100%, calc(var(--vh) - 170px));
   padding: 8px 4px 0; text-align: center; color: var(--muted);
 }
 .message.bad { color: var(--warn); font-weight: 600; }
@@ -179,7 +183,7 @@ button.on:hover:not(:disabled) { background: #ffeca6; }
 .fb-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pill {
   display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
-  background: var(--pill, #888); color: #fff; letter-spacing: .2px;
+  background: var(--pill, #888); color: var(--pill-ink, #1d1d1d); letter-spacing: .2px;
 }
 .pill.pending { background: var(--line); color: var(--muted); }
 .fb-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -286,3 +290,10 @@ menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 1
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .coords text { transition: font-size 0.12s, fill 0.12s; }
 .coords text.on { font-size: 40px; font-weight: 800; fill: #2b1a05; }
+
+/* Reduced motion: no drops, pulses, blinks or sliding. Captured stones go at once:
+   their fade is what removes them until the next redraw. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .stone.vanish { display: none; }
+}

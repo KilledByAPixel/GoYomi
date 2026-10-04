@@ -37,6 +37,7 @@ function ready() {
   if (!enabled) return false;
   if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
   const ctx = ZZFX.audioContext;
+  if (!ctx) return false; // no audio in this browser: the game plays silently
   if (ctx.state === 'suspended') ctx.resume();
   return true;
 }

@@ -223,12 +223,15 @@ function bestOf(an) {
   return { winrate: m.winrate, score: m.score * sign(an.toPlay), move: m.move };
 }
 
+// `ink`: the text colour on a grade's colour, whichever of dark or white
+// reads at 4.5:1 or better (white on the yellow was about 2:1).
+const DARK = '#1d1d1d';
 export const GRADES = {
-  best: { label: 'Best move', color: '#2f9e61' },
-  good: { label: 'Good', color: '#4f9fd6' },
-  inaccuracy: { label: 'Inaccuracy', color: '#d9b43a' },
-  mistake: { label: 'Mistake', color: '#e07b2c' },
-  blunder: { label: 'Blunder', color: '#d2413a' },
+  best: { label: 'Best move', color: '#2f9e61', ink: DARK },
+  good: { label: 'Good', color: '#4f9fd6', ink: DARK },
+  inaccuracy: { label: 'Inaccuracy', color: '#d9b43a', ink: DARK },
+  mistake: { label: 'Mistake', color: '#e07b2c', ink: DARK },
+  blunder: { label: 'Blunder', color: '#d2413a', ink: '#fff' },
 };
 
 // The search entry for a move, including when the move is a mirror image

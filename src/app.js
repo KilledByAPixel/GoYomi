@@ -46,6 +46,7 @@ const DEFAULTS = {
   coachFor: 'auto',
   speak: false,
   sound: true,
+  shortcuts: true,           // single-letter keyboard shortcuts (L, A, H, P…); can be turned off (WCAG 2.1.4)
   show: { liberties: true, atari: true, territory: false, preview: true, feedback: true, hints: false, numbers: false },
 };
 
@@ -74,12 +75,35 @@ let locatePt = null;         // a point the player is hovering in the coach's te
 let threat = null;           // { node, pending | none | move, pv, facts, cost } — opponent's idea
 
 const COACHES = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 2));
+// A built-in engine whose workers start on its first search: KataGo is the
+// default, so usually they never do. Starting a worker can fail (a strict
+// content policy, say): then the page still works, and searches answer null as
+// a failed worker's do. Cancelling or asking `busy` never starts one.
+let builtinFailed = false;
+function lazyEngine(make) {
+  let e = null;
+  const get = () => {
+    if (!e && !builtinFailed) {
+      try { e = make(); } catch (err) {
+        builtinFailed = true;
+        flash(`GoYomi's own engine can't start in this browser (${plainReason(String(err && err.message || err))}).`, 'bad');
+      }
+    }
+    return e;
+  };
+  return {
+    search: (...args) => get() ? e.search(...args) : Promise.resolve(null),
+    cancel: () => { if (e) e.cancel(); },
+    get busy() { return !!(e && e.busy); },
+    get engines() { return get() ? e.engines : []; }, // a pool's engines, for separate jobs
+  };
+}
 const builtin = {
-  opponent: new Engine('opponent'),
+  opponent: lazyEngine(() => new Engine('opponent')),
   // Coach engines, one position each; pooled (root stats merged) only for the quick dead-stone read.
-  coach: new EnginePool('coach', COACHES),
+  coach: lazyEngine(() => new EnginePool('coach', COACHES)),
   // Answers "what would the opponent play if I passed?"
-  scout: new Engine('scout'),
+  scout: lazyEngine(() => new Engine('scout')),
 };
 // The KataGo network, in one worker shared by its engines; started when first wanted.
 const kata = { state: 'off', host: null, opponent: null, coach: null, scout: null, info: null };
@@ -104,6 +128,8 @@ const fmtK = n => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : Str
 const plural = (n, w) => `${n} ${n === 1 ? w : w.replace(/y$/, 'ie') + 's'}`;
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const coachLevel = () => resolveLevel(settings.coachFor, settings.level);
+// Scrolls glide unless the player asked their system for reduced motion.
+const scrollMotion = () => globalThis.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
 
 function isAITurn(node = game.current) {
   const ai = aiColor();
@@ -135,7 +161,14 @@ function plainReason(message = '') {
 function startKata() {
   if (kata.state !== 'off') return;
   kata.state = 'loading';
-  kata.host = new KataWorker();
+  try { kata.host = new KataWorker(); } catch (err) {
+    // No worker at all (a strict content policy, say): the built-in engine plays.
+    kata.state = 'failed';
+    kata.info = { ok: false, message: String(err && err.message || err) };
+    flash(`KataGo couldn't start here (${plainReason(kata.info.message)}), so the AI and coach use GoYomi's own engine, which is much weaker and slower.`);
+    renderEngineInfo();
+    return;
+  }
   // The AI's move outranks the coach's background reads on the shared network.
   kata.opponent = new KataEngine('kopponent', kata.host, { priority: 1 });
   kata.host.onFail = message => {
@@ -658,12 +691,14 @@ async function enterScoring(restored = false) {
       await kataSettled();
       if (scoring !== mine) return;
       an = await coach.search(game.recipe(node), { playouts: 8000, reportMs: 0 });
+      if (scoring !== mine) return; // left, or a newer count took over (and cancelled this search)
       if (an) { node.analysis = preferUsefulMove(an); node.analysisDone = true; tryGrade(node); }
     }
-    if (scoring !== mine) return; // left, or a newer count took over (and cancelled this search)
+    if (scoring !== mine) return;
     scoring.dead = an ? estimateDead(node.board, an.ownership) : new Set();
-    if (!an) flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
-    node.scoredDead = new Set(scoring.dead);
+    // Without a read nothing is kept: the next count tries again (clicked groups are kept by toggleDead).
+    if (an) node.scoredDead = new Set(scoring.dead);
+    else flash('The coach couldn\'t read this position, so no stones are marked dead. Click any dead groups yourself.');
   }
   scoring.pending = false;
   save();
@@ -671,7 +706,7 @@ async function enterScoring(restored = false) {
   announce(`Game over. ${resultPhrase(s0.winner, s0.margin)} ${ladderSentence()}`.trim());
   if (!restored) playSound(settings.human && s0.winner !== settings.human ? 'lose' : 'win');
   render();
-  if (!restored) $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // stacked below the board on phones
+  if (!restored) $('#scorePanel').scrollIntoView({ block: 'nearest', behavior: scrollMotion() }); // stacked below the board on phones
   scheduleCoach();
 }
 
@@ -943,6 +978,7 @@ function renderBadge() {
   el.textContent = `${text} ↓`;
   el.classList.toggle('pending', !shown);
   el.style.setProperty('--pill', shown ? shown.color : '');
+  el.style.setProperty('--pill-ink', shown ? shown.ink : '');
   el.setAttribute('aria-label', shown ? `Coach: ${shown.label} on ${pt}. Show the coach's comments.` : 'Coach: still grading your move. Show the coach.');
 }
 
@@ -1056,7 +1092,7 @@ function renderReview() {
     const s = stats[c];
     if (!s.n) return '';
     const pills = ['blunder', 'mistake', 'inaccuracy'].filter(k => s.counts[k])
-      .map(k => `<span class="pill" style="--pill:${GRADES[k].color}">${plural(s.counts[k], gradeLabel(k, level).toLowerCase())}</span>`).join(' ');
+      .map(k => `<span class="pill" style="--pill:${GRADES[k].color};--pill-ink:${GRADES[k].ink}">${plural(s.counts[k], gradeLabel(k, level).toLowerCase())}</span>`).join(' ');
     const avg = level === 'beginner' ? '' : `<span class="muted">avg −${(s.loss / s.n).toFixed(1)} pts/move</span>`;
     return `<div class="rv-row"><span class="stone-icon ${c === BLACK ? 'black' : 'white'}"></span><b>${who(c)}</b>` +
       `${avg}${pills || '<span class="muted">no mistakes yet</span>'}</div>`;
@@ -1148,10 +1184,10 @@ function moveEntry(node) {
   if (!settings.show.feedback) html = head('');
   else if (!g) html = head(`<span class="pill pending">${node.checkMove != null ? 'double-checking…' : 'grading…'}</span>`);
   else if (puzzle(node, ctx.shown = levelGrade(g, level, facts))) {
-    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + '<p>There was something better here. Can you find it?</p>' +
+    html = head(`<span class="pill" style="--pill:${ctx.shown.color};--pill-ink:${ctx.shown.ink}">${ctx.shown.label}</span>`) + '<p>There was something better here. Can you find it?</p>' +
       `<div class="fb-actions"><button data-act="retry" data-id="${node.id}">Try again</button><button data-act="reveal" data-id="${node.id}">Show answer</button></div>`;
   } else {
-    html = head(`<span class="pill" style="--pill:${ctx.shown.color}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
+    html = head(`<span class="pill" style="--pill:${ctx.shown.color};--pill-ink:${ctx.shown.ink}">${ctx.shown.label}</span>`) + `<p>${found(node, ctx.shown) ? '<b>You found it!</b> ' : ''}${verdict(g, level, ctx.shown)}</p>`;
     if (g.grade !== 'best' && g.bestMove !== PASS) {
       html += `<div class="fb-actions"><button data-act="try" data-id="${node.id}">${armed === node ? `Play ${ptName(g.bestMove)}` : `Try ${ptName(g.bestMove)} instead`}</button></div>`;
     }
@@ -1411,26 +1447,26 @@ function load() {
     settings.coachPlayouts = { 8000: 16000, 24000: 48000, 80000: 120000 }[settings.coachPlayouts] || settings.coachPlayouts;
     if (![16000, 48000, 120000].includes(settings.coachPlayouts)) settings.coachPlayouts = DEFAULTS.coachPlayouts;
     if (!['katago', 'builtin'].includes(settings.coachEngine)) settings.coachEngine = DEFAULTS.coachEngine;
-    settings.gradeAI = !!settings.gradeAI;
-    settings.findYourself = !!settings.findYourself;
-    settings.ladder = !!settings.ladder;
+    // On/off settings (and the overlays) are true or false, else their default:
+    // stored junk mustn't, say, turn the coach off for good.
+    for (const k of Object.keys(DEFAULTS)) if (typeof DEFAULTS[k] === 'boolean' && typeof settings[k] !== 'boolean') settings[k] = DEFAULTS[k];
+    for (const k of Object.keys(DEFAULTS.show)) if (typeof settings.show[k] !== 'boolean') settings.show[k] = DEFAULTS.show[k];
     if (![0, BLACK, WHITE].includes(settings.lastHuman)) settings.lastHuman = DEFAULTS.lastHuman;
-    settings.studyFromImport = !!settings.studyFromImport;
-    settings.speak = !!settings.speak;
     if (!COACH_FOR.some(o => o.key === settings.coachFor)) settings.coachFor = DEFAULTS.coachFor;
     if (![0, BLACK, WHITE].includes(settings.human)) settings.human = DEFAULTS.human;
     if (![0, 2, 3, 4, 5].includes(settings.handicap)) settings.handicap = DEFAULTS.handicap;
     if (!Number.isFinite(settings.komi)) settings.komi = DEFAULTS.komi;
     game = Game.fromSGF(d.sgf);
+    const list = v => Array.isArray(v) ? v : [];
     let n = game.root;
-    for (const i of d.path || []) { if (!n.children[i]) break; n = n.children[i]; }
+    for (const i of list(d.path)) { if (!n.children[i]) break; n = n.children[i]; }
     game.goTo(n);
-    resigned = d.resigned || 0;
-    const at = path => { let n = game.root; for (const i of path || []) { if (!n.children[i]) return null; n = n.children[i]; } return n; };
-    for (const e of d.dead || []) {
-      const n = at(e.path);
+    resigned = [BLACK, WHITE].includes(d.resigned) ? d.resigned : 0;
+    const at = path => { let n = game.root; for (const i of list(path)) { if (!n.children[i]) return null; n = n.children[i]; } return n; };
+    for (const e of list(d.dead)) {
+      const n = e && at(e.path);
       // Only stones actually on that board can be marked dead.
-      if (n) n.scoredDead = new Set((e.points || []).filter(p => n.board.color[p] === BLACK || n.board.color[p] === WHITE));
+      if (n) n.scoredDead = new Set(list(e.points).filter(p => n.board.color[p] === BLACK || n.board.color[p] === WHITE));
     }
     restoreScoring = d.scoring ? at(d.scoring) : null;
     return true;
@@ -1461,10 +1497,13 @@ function importSGF(text) {
     stopCoach();
     game = g;
     resetCoachHeight();
-    settings.lastHuman = settings.human;
+    // The colour the player had, for New game to offer back: not study mode's 0
+    // when a game is loaded while another loaded one is on show.
+    if (settings.human) settings.lastHuman = settings.human;
     settings.human = 0;
     settings.studyFromImport = true;
     mode = 'play'; scoring = null; resigned = 0; peek = null; armed = null;
+    hintOn = false; locatePt = null; threat = null; scout.cancel();
     syncOptions();
     flash('Game loaded in study mode (you play both colours). Step through it and watch the coach.');
     afterChange();
@@ -1516,6 +1555,7 @@ function syncOptions() {
   $('#optLadder').checked = settings.ladder;
   $('#optSpeak').checked = settings.speak;
   $('#optSound').checked = settings.sound;
+  $('#optShortcuts').checked = settings.shortcuts;
   $('#toggles').querySelectorAll('input').forEach(i => { i.checked = !!settings.show[i.dataset.key]; });
 }
 
@@ -1556,7 +1596,8 @@ function setupControls() {
   };
   $('#optFindYourself').onchange = e => { settings.findYourself = e.target.checked; save(); render(); };
   $('#optLadder').onchange = e => { settings.ladder = e.target.checked; save(); render(); };
-  $('#coachBadge').onclick = () => $('.coach').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('#coachBadge').onclick = () => $('.coach').scrollIntoView({ behavior: scrollMotion(), block: 'start' });
+  $('#optShortcuts').onchange = e => { settings.shortcuts = e.target.checked; save(); };
   $('#optSound').onchange = e => { settings.sound = e.target.checked; setSoundEnabled(settings.sound); save(); if (settings.sound) playSound('stone'); };
   $('#optSpeak').onchange = e => { settings.speak = e.target.checked; setSpeech(settings.speak); save(); announce(settings.speak ? 'Speech on.' : 'Speech off.'); };
   if (!speechAvailable()) { $('#optSpeak').disabled = true; $('#speakNote').hidden = false; }
@@ -1632,19 +1673,26 @@ function setupControls() {
       if (e.target.closest('select') && /^(Arrow|Home|End|Enter| )/.test(e.key)) return;
     }
     const k = e.key.toLowerCase();
+    // Home, End, Page Up and Down scroll the page (on phones the panels sit
+    // below the board): they step through the game only from the board's own
+    // controls. Left and right step from anywhere; they don't scroll.
+    const atGame = e.target instanceof Element && !!e.target.closest('#board, .nav, #graph, .variations');
+    // Single letters can be turned off (Settings), for speech input and switch users.
+    const letter = settings.shortcuts && k.length === 1;
     if (e.key === 'ArrowLeft') nav('prev');
     else if (e.key === 'ArrowRight') nav('next');
-    else if (e.key === 'Home') nav('first');
-    else if (e.key === 'End') nav('last');
-    else if (e.key === 'PageUp') nav('prev');
-    else if (e.key === 'PageDown') nav('next');
+    else if (e.key === 'Home' && atGame) nav('first');
+    else if (e.key === 'End' && atGame) nav('last');
+    else if (e.key === 'PageUp' && atGame) nav('prev');
+    else if (e.key === 'PageDown' && atGame) nav('next');
+    else if (e.key === 'Escape') { peek = null; armed = null; hintOn = false; threat = null; scout.cancel(); render(); }
+    else if (!letter) return;
     else if (k === 's') { if (!$('#optSpeak').disabled) $('#optSpeak').click(); }
     else if (k === 'r') repeatLast();
-    else if (k === 'u' || e.key === 'Backspace') takeBack();
+    else if (k === 'u') takeBack();
     else if (k === 'h') $('#btnHint').click();
     else if (k === 'o') toggleThreat();
     else if (k === 'p') humanPass();
-    else if (e.key === 'Escape') { peek = null; armed = null; hintOn = false; threat = null; scout.cancel(); render(); }
     else if (toggleKey[k]) {
       const key = toggleKey[k] === 'best' ? 'hints' : toggleKey[k];
       settings.show[key] = !settings.show[key];
