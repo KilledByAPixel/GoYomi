@@ -309,11 +309,11 @@ test('SGF: autosave and reload don\'t turn default names into a record\'s names'
 
 test('SGF: a handicap needs its stones; no stones or an impossible count means no handicap', () => {
   const none = Game.fromSGF('(;GM[1]SZ[9]HA[2])');
-  assert.deepEqual([none.handicap, none.handicapBonus, none.recipe().komi, none.root.board.toPlay], [0, 0, 7, BLACK], 'no stones');
+  assert.deepEqual([none.handicap, none.handicapBonus, none.recipe().komi, none.root.board.toPlay], [0, 0, 0, BLACK], 'no stones');
   const white = Game.fromSGF('(;GM[1]SZ[9]HA[2]AW[ee])');
   assert.deepEqual([white.handicap, white.handicapBonus], [0, 0], 'only White setup stones');
   const ten = Game.fromSGF('(;GM[1]SZ[9]HA[2]AB[aa][ba][ca][da][ea][fa][ga][ha][ia][ab])');
-  assert.deepEqual([ten.handicap, ten.handicapBonus, ten.recipe().komi], [0, 0, 7], 'ten stones is a position, not a handicap');
+  assert.deepEqual([ten.handicap, ten.handicapBonus, ten.recipe().komi], [0, 0, 0], 'ten stones is a position, not a handicap');
   const fine = Game.fromSGF('(;GM[1]SZ[9]HA[3]AB[cc][gg][cg])');
   assert.deepEqual([fine.handicap, fine.handicapBonus, fine.root.board.toPlay], [3, 3, WHITE], 'an ordinary handicap');
 });
@@ -331,4 +331,221 @@ test('SGF: every record that loads can be saved and loaded again unchanged', () 
     assert.equal(back.toSGF(), saved, r);
     assert.deepEqual([back.handicap, back.handicapBonus, back.komi, back.root.board.toPlay], [g.handicap, g.handicapBonus, g.komi, g.root.board.toPlay], r);
   }
+});
+
+// What the player sees is "Could not load that SGF: " and then the message.
+const loadError = sgf => { try { Game.fromSGF(sgf); } catch (e) { return e.message; } assert.fail(`loaded: ${sgf}`); };
+
+test('SGF: a property with no value is a clear error, not a crash', () => {
+  for (const id of ['HA', 'PL', 'SZ', 'KM', 'AB']) {
+    assert.equal(loadError(`(;GM[1]SZ[9]${id})`), `the file isn't valid SGF (on line 1, the property ${id} has no value).`, id);
+  }
+  assert.equal(loadError('(;GM[1]SZ[9]\n;B[ee]PL;W[cc])'), 'the file isn\'t valid SGF (on line 2, the property PL has no value).');
+  assert.equal(loadError('(;GM[1]SZ[])'), 'its board size, "", isn\'t a number.');
+  assert.equal(loadError('(;GM[1]SZ[nine])'), 'its board size, "nine", isn\'t a number.');
+});
+
+test('SGF: the board must be 9 or 9:9; other sizes say what they are', () => {
+  assert.equal(loadError('(;GM[1]SZ[9:7])'), 'it\'s a 9x7 game; only 9x9 is supported.');
+  assert.equal(loadError('(;GM[1]SZ[19])'), 'it\'s a 19x19 game; only 9x9 is supported.');
+  assert.equal(loadError('(;GM[1];B[ee])'), 'it\'s a 19x19 game; only 9x9 is supported.', 'no SZ means 19x19');
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9:9];B[ee])').root.children.length, 1);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[ 9 ];B[ee])').root.children.length, 1);
+});
+
+test('SGF: compressed point lists (a rectangle by its corners) set up every point', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9]AB[cc:ee]AW[gg][hg:hh])');
+  const b = g.root.board;
+  for (let x = 2; x <= 4; x++) for (let y = 2; y <= 4; y++) assert.equal(b.color[pt(x, y)], BLACK);
+  assert.deepEqual(g.setup.filter(([, c]) => c === WHITE).map(([p]) => ptName(p)).sort(), ['G3', 'H2', 'H3']);
+  assert.equal(g.setup.length, 12);
+  // Corners in either order, and a one-point "rectangle".
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]AB[ee:cc])').setup.length, 9);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]AB[ee:ee])').setup.length, 1);
+  // Saved as single points, which load back the same.
+  assert.equal(Game.fromSGF(g.toSGF()).toSGF(), g.toSGF());
+  // The checks still apply to each point.
+  assert.match(loadError('(;GM[1]SZ[9]AB[cc:ee]AW[dd])'), /starting position is invalid \(D6 is listed twice\)/);
+  assert.match(loadError('(;GM[1]SZ[9]AB[aa:ii])'), /has no liberties/);
+  assert.match(loadError('(;GM[1]SZ[9]AB[cc:zz])'), /invalid \("cc:zz" is not on the board\)/);
+  assert.match(loadError('(;GM[1]SZ[9]AB[cc:dd:ee])'), /"cc:dd:ee" is not on the board/);
+  assert.match(loadError('(;GM[1]SZ[9]AB[cc:])'), /"cc:" is not a point/);
+});
+
+test('SGF: a cut-short file or a trailing backslash says the file is cut short', () => {
+  for (const sgf of ['(;GM[1]SZ[9];B[ee];W[c', '(;GM[1]SZ[9];B[ee]C[abc\\', '(;GM[1]SZ[9];B[ee]C[path\\])', '(;GM[1]SZ[9];B[ee]',
+    '(;GM[1]SZ[9];B[ee](;W[cc])', '(;GM[1]SZ[9]', '(;GM[1]SZ[9];B[ee]PL', '(;']) {
+    assert.equal(loadError(sgf), 'the file stops partway through the record; it may be cut short.', sgf);
+  }
+});
+
+test('SGF: text before and after the record is ignored; stray text inside it is an error', () => {
+  const g = Game.fromSGF('From: a friend\n(see below)\n\n(;GM[1]SZ[9];B[ee];W[cc])\n-- sent from my phone (;GM[1]SZ[19])');
+  assert.deepEqual(g.line(g.root).slice(1).map(n => ptName(n.move)), ['E5', 'C7']);
+  assert.equal(loadError('(;GM[1]SZ[9];B[ee]\njunk;W[cc])'), 'the file isn\'t valid SGF (on line 2, "junk" is out of place).');
+  assert.equal(loadError('(;GM[1]SZ[9];B[ee]1)'), 'the file isn\'t valid SGF (on line 1, "1" is out of place).');
+  assert.equal(loadError('(;GM[1]SZ[9];B[ee]];W[cc])'), 'the file isn\'t valid SGF (on line 1, "]" is out of place).');
+  assert.equal(loadError('(;GM[1]SZ[9];B[ee]()(;W[cc]))'), 'the file isn\'t valid SGF (on line 1, a variation has no moves).');
+  for (const text of ['', 'hello', '()', '(GM[1])']) assert.equal(loadError(text), 'the file has no SGF game record in it.', text);
+});
+
+test('SGF: an illegal move says which move and why', () => {
+  assert.equal(loadError('(;GM[1]SZ[9];B[ee];W[ee])'), 'move 2, White E5, is against the rules (there is already a stone there).');
+  assert.equal(loadError('(;GM[1]SZ[9];B[ba];W[ia];B[ab];W[aa])'), 'move 4, White A9, is against the rules (it is suicide).');
+});
+
+test('SGF: a missing KM means no komi; GoYomi\'s own files always say', () => {
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9];B[ee])').komi, 0);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]KM[6.5];B[ee])').komi, 6.5);
+  assert.equal(Game.fromSGF('(;GM[1]SZ[9]KM[6,5])').komi, 6.5);
+  // The handicap bonus is kept on top: two stones, no KM.
+  const h = Game.fromSGF('(;GM[1]SZ[9]HA[2]AB[gc][cg])');
+  assert.deepEqual([h.komi, h.handicapBonus, h.recipe().komi], [0, 2, 2]);
+  for (const komi of [7, 0, 0.5, -3]) {
+    const g = new Game({ komi });
+    assert.ok(g.toSGF().includes(`KM[${komi}]`), `${komi}`);
+    assert.equal(Game.fromSGF(g.toSGF()).komi, komi);
+  }
+});
+
+test('SGF: variations that start with the same move are merged', () => {
+  const g = Game.fromSGF('(;GM[1]SZ[9];B[ee](;W[cc];B[gg])(;W[cc];B[gc]))');
+  const e5 = g.root.children[0];
+  assert.equal(e5.children.length, 1);
+  assert.deepEqual(e5.children[0].children.map(n => ptName(n.move)), ['G3', 'G7']);
+  assert.deepEqual(g.line(g.root).slice(1).map(n => ptName(n.move)), ['E5', 'C7', 'G3']);
+});
+
+// A small seeded generator, so the long game is the same every run.
+const seeded = s => () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+
+test('SGF: a long game with captures round-trips', () => {
+  const g = new Game({ komi: 7 }), rand = seeded(12345);
+  while (g.current.depth < 300) {
+    let p = PASS;
+    for (let k = 0; k < 30; k++) {
+      const q = pt(Math.floor(rand() * 9), Math.floor(rand() * 9));
+      if (g.check(q).ok) { p = q; break; }
+    }
+    assert.ok(g.play(p));
+  }
+  assert.ok(g.board.captures[BLACK] + g.board.captures[WHITE] > 10, 'stones were captured along the way');
+  const saved = g.toSGF(), back = Game.fromSGF(saved);
+  assert.equal(back.toSGF(), saved);
+  let end = back.root;
+  while (end.children.length) end = end.children[0];
+  assert.equal(end.depth, 300);
+  assert.equal(end.board.hash, g.board.hash);
+  assert.deepEqual(end.board.captures, g.board.captures);
+});
+
+test('SGF: a very deeply nested record loads without overflowing the stack', () => {
+  const depth = 10000;
+  let sgf = '(;GM[1]SZ[9]KM[7]';
+  for (let k = 0; k < depth; k++) sgf += `(;${k % 2 ? 'W' : 'B'}[]`;
+  sgf += ')'.repeat(depth + 1);
+  const g = Game.fromSGF(sgf);
+  let end = g.root;
+  while (end.children.length) end = end.children[0];
+  assert.equal(end.depth, depth);
+  assert.equal(Game.fromSGF(g.toSGF()).toSGF(), g.toSGF());
+  assert.equal(loadError('(;'.repeat(100000)), 'the file stops partway through the record; it may be cut short.');
+});
+
+test('play continues after two passes (play resumes after counting)', () => {
+  const g = new Game();
+  playAll(g, 'E5');
+  g.pass(); g.pass();
+  assert.ok(g.isOver());
+  assert.deepEqual(g.check(P('C3')), { ok: true });
+  assert.ok(g.play(P('C3')));
+  assert.equal(g.board.color[P('C3')], WHITE, 'White moves, as after any pass by Black');
+  assert.equal(g.isOver(), false);
+});
+
+test('superko: a triple ko cycle can\'t return to an earlier position', () => {
+  // Three kos, one above another. In each, Black takes at (3,y); White takes at (2,y).
+  const ko = (y, inside) => [[pt(1, y), BLACK], [pt(2, y - 1), BLACK], [pt(2, y + 1), BLACK],
+    [pt(3, y - 1), WHITE], [pt(3, y + 1), WHITE], [pt(4, y), WHITE], inside === WHITE ? [pt(2, y), WHITE] : [pt(3, y), BLACK]];
+  const g = new Game({ komi: 7, setup: [...ko(1, WHITE), ...ko(4, WHITE), ...ko(7, BLACK)] });
+  const start = g.board.hash;
+  // Each move takes a different ko than the one just taken, so plain ko never applies.
+  for (const [x, y] of [[3, 1], [2, 7], [3, 4], [2, 1], [3, 7]]) {
+    assert.ok(g.play(pt(x, y)), `${x},${y}`);
+    assert.notEqual(g.board.hash, start);
+  }
+  assert.equal(g.current.captured.length, 1);
+  assert.notEqual(g.board.ko, pt(2, 4));
+  // White taking the middle ko now would bring back the starting position.
+  assert.ok(g.board.isLegal(pt(2, 4)));
+  assert.deepEqual(g.check(pt(2, 4)), { ok: false, reason: 'superko' });
+  assert.equal(g.play(pt(2, 4)), null);
+});
+
+test('deleteBranch removes a variation and moves off it if needed', () => {
+  const g = new Game();
+  playAll(g, 'E5 C3 G7');
+  const e5 = g.root.children[0], c3 = e5.children[0];
+  g.goTo(e5);
+  playAll(g, 'D4');
+  const d4 = g.current;
+  assert.equal(e5.lastChild, d4);
+  g.deleteBranch(d4);
+  assert.equal(g.current, e5, 'the current node was inside the branch');
+  assert.deepEqual(e5.children, [c3]);
+  assert.equal(e5.lastChild, c3, 'redo follows what is left');
+  assert.equal(ptName(g.redo().move), 'C3');
+  g.goTo(e5);
+  g.deleteBranch(c3);
+  assert.equal(g.current, e5, 'outside the branch: stays put');
+  assert.deepEqual([e5.children.length, e5.lastChild], [0, null]);
+  g.deleteBranch(g.root);
+  assert.equal(g.root.children.length, 1, 'the root is never deleted');
+  playAll(g, 'C3 G7');
+  g.deleteBranch(e5.children[0]);
+  assert.equal(g.current, e5, 'from deep inside');
+});
+
+test('goTo remembers the path to the node, so redo and line() follow it', () => {
+  const g = new Game();
+  playAll(g, 'E5 C3 G7');
+  const e5 = g.root.children[0], g7 = g.current;
+  g.goTo(e5);
+  playAll(g, 'D4 F6');
+  const f6 = g.current;
+  const names = () => g.line(g.root).slice(1).map(n => ptName(n.move));
+  assert.deepEqual(names(), ['E5', 'D4', 'F6']);
+  g.goTo(g7);
+  assert.equal(e5.lastChild, e5.children[0]);
+  assert.equal(g.root.lastChild, e5);
+  assert.deepEqual(names(), ['E5', 'C3', 'G7']);
+  g.goTo(g.root);
+  g.redo(); g.redo(); g.redo();
+  assert.equal(g.current, g7);
+  g.goTo(f6);
+  assert.deepEqual(names(), ['E5', 'D4', 'F6']);
+  // Going to a node part way along keeps what lies beyond it.
+  g.goTo(e5);
+  assert.deepEqual(names(), ['E5', 'D4', 'F6']);
+});
+
+test('score: dead stones count for the other side, by area and by territory', () => {
+  // Black wall on column D, White wall on column F, a lone White stone in Black's area.
+  const setup = [];
+  for (let y = 0; y < 9; y++) setup.push([pt(3, y), BLACK], [pt(5, y), WHITE]);
+  setup.push([pt(1, 4), WHITE]);
+  const g = new Game({ komi: 0.5, setup });
+  const alive = g.score();
+  assert.deepEqual([alive.black, alive.white], [9, 37], 'Black\'s area touches the white stone, so it is no one\'s');
+  const s = g.score(new Set([pt(1, 4)]));
+  assert.deepEqual([s.black, s.white, s.margin, s.text, s.winner], [36, 36, -0.5, 'W+0.5', WHITE]);
+  assert.equal(s.owner[pt(1, 4)], BLACK);
+  assert.equal(s.owner[pt(4, 4)], 0, 'the column between is neutral');
+  // Territory: 27 points each, the dead stone a prisoner for Black.
+  assert.deepEqual(s.territory, { black: 27, white: 27, capturesB: 1, capturesW: 0, margin: 0.5 });
+  // Captures during play are prisoners too.
+  const c = new Game({ komi: 7 });
+  playAll(c, 'A2 A1 B2 J9 B1');
+  assert.equal(c.score().territory.capturesB, 1);
+  assert.equal(c.score().territory.capturesW, 0);
 });

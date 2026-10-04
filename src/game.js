@@ -66,7 +66,8 @@ export class Game {
     return set;
   }
 
-  // { ok, reason } — reason is one of 'occupied', 'ko', 'suicide', 'superko', 'over'.
+  // { ok, reason } — reason is one of 'occupied', 'ko', 'suicide', 'superko'.
+  // Two passes don't forbid moves: play can resume after counting.
   check(p, node = this.current) {
     if (p === PASS) return { ok: true };
     const b = node.board;
@@ -211,83 +212,119 @@ export class Game {
     return s + walk(this.root) + ')';
   }
 
+  // Errors are worded to follow "Could not load that SGF: ".
   static fromSGF(text) {
     let i = 0;
     const ws = () => { while (i < text.length && /\s/.test(text[i])) i++; };
+    const cut = () => new Error('the file stops partway through the record; it may be cut short.');
+    const bad = what => new Error(`the file isn't valid SGF (on line ${text.slice(0, i).split('\n').length}, ${what}).`);
     const parseNode = () => {
       const props = {};
       ws();
       while (i < text.length && /[A-Za-z]/.test(text[i])) {
+        const from = i;
         let id = '';
         while (i < text.length && /[A-Za-z]/.test(text[i])) { if (text[i] === text[i].toUpperCase()) id += text[i]; i++; }
+        // Old files mix lower case into ids ("AddBlack"); all lower case is just stray text.
+        if (!id) { const word = text.slice(from, i).slice(0, 12); i = from; throw bad(`"${word}" is out of place`); }
         const vals = [];
         ws();
         while (text[i] === '[') {
           i++;
           let v = '';
-          while (i < text.length && text[i] !== ']') {
-            if (text[i] === '\\') {
-              i++;
+          for (;;) {
+            if (i >= text.length) throw cut();
+            let ch = text[i++];
+            if (ch === ']') break;
+            if (ch === '\\') {
+              if (i >= text.length) throw cut();
+              ch = text[i++];
               // Backslash + newline (\n, \r, \r\n or \n\r) is a soft line break: drop both.
-              const nl = text[i];
-              if (nl === '\n' || nl === '\r') {
-                i++;
-                if ((text[i] === '\n' || text[i] === '\r') && text[i] !== nl) i++;
+              if (ch === '\n' || ch === '\r') {
+                if ((text[i] === '\n' || text[i] === '\r') && text[i] !== ch) i++;
                 continue;
               }
             }
-            v += text[i++];
+            v += ch;
           }
-          i++;
           vals.push(v);
           ws();
         }
+        if (!vals.length) throw i >= text.length ? cut() : bad(`the property ${id} has no value`);
         props[id] = vals;
       }
       return props;
     };
+    // Iterative, so a deeply nested record can't overflow the stack.
     const parseTree = () => {
-      ws();
-      if (text[i] !== '(') throw new Error('SGF: expected (');
-      i++;
-      const seq = [];
-      ws();
-      while (text[i] === ';') { i++; seq.push(parseNode()); ws(); }
-      const vars = [];
-      while (text[i] === '(') { vars.push(parseTree()); ws(); }
-      if (text[i] !== ')') throw new Error('SGF: expected )');
-      i++;
-      return { seq, vars };
+      const open = [];
+      for (;;) {
+        ws();
+        if (i >= text.length) throw cut();
+        if (text[i] === '(') {
+          i++; ws();
+          if (i >= text.length) throw cut();
+          if (text[i] !== ';') throw bad('a variation has no moves');
+          const t = { seq: [], vars: [] };
+          while (text[i] === ';') { i++; t.seq.push(parseNode()); ws(); }
+          if (open.length) open[open.length - 1].vars.push(t);
+          open.push(t);
+        } else if (text[i] === ')') {
+          i++;
+          const t = open.pop();
+          if (!open.length) return t;
+        } else throw bad(`"${text[i]}" is out of place`);
+      }
     };
-    const start = text.indexOf('(');
-    if (start < 0) throw new Error('Not an SGF file');
+    // Anything before the record (mail headers…) or after it (more games in a
+    // collection) is ignored: the first game is the one loaded.
+    const start = text.search(/\(\s*;/);
+    if (start < 0) throw new Error('the file has no SGF game record in it.');
     i = start;
     const tree = parseTree();
-    const rootProps = tree.seq[0] || {};
-    const sz = rootProps.SZ ? parseInt(rootProps.SZ[0], 10) : 19; // SGF's default size is 19
-    if (sz !== N) throw new Error(`that is a ${sz}x${sz} game; only ${N}x${N} is supported`);
+    const rootProps = tree.seq[0];
+    // SGF's default size is 19; a rectangular board is written "columns:rows".
+    const szv = rootProps.SZ ? rootProps.SZ[0] : '19';
+    const sz = /^\s*(\d+)\s*(?::\s*(\d+)\s*)?$/.exec(szv);
+    if (!sz) throw new Error(`its board size, "${szv}", isn't a number.`);
+    const cols = +sz[1], rows = sz[2] ? +sz[2] : cols;
+    if (cols !== N || rows !== N) throw new Error(`it's a ${cols}x${rows} game; only ${N}x${N} is supported.`);
     const toPt = v => {
       if (!v || v === 'tt') return PASS;
       const x = v.charCodeAt(0) - 97, y = v.charCodeAt(1) - 97;
-      if (v.length !== 2 || x < 0 || x >= N || y < 0 || y >= N) throw new Error(`coordinate "${v}" is outside a ${N}x${N} board`);
+      if (v.length !== 2 || x < 0 || x >= N || y < 0 || y >= N) throw new Error(`coordinate "${v}" is outside a ${N}x${N} board.`);
       return pt(x, y);
     };
     const setup = [];
     // Validate the starting position before any stone is placed.
-    const invalid = why => new Error(`This SGF's starting position is invalid (${why}).`);
+    const invalid = why => new Error(`its starting position is invalid (${why}).`);
     const seen = new Set();
-    const addSetup = (v, c) => {
+    const corner = (s, v) => {
       let p;
-      try { p = toPt(v); } catch { throw invalid(`"${v}" is not on the board`); }
+      try { p = toPt(s); } catch { throw invalid(`"${v}" is not on the board`); }
       if (p === PASS) throw invalid(`"${v}" is not a point`);
-      if (seen.has(p)) throw invalid(`${ptName(p)} is listed twice`);
-      seen.add(p);
-      setup.push([p, c]);
+      return p;
+    };
+    // FF[4] may compress a rectangle of points to its corners, "cc:ee".
+    const addSetup = (v, c) => {
+      const ends = v.split(':');
+      if (ends.length > 2) throw invalid(`"${v}" is not on the board`);
+      const a = corner(ends[0], v), b = corner(ends[ends.length - 1], v);
+      for (let y = Math.min(ptY(a), ptY(b)); y <= Math.max(ptY(a), ptY(b)); y++) {
+        for (let x = Math.min(ptX(a), ptX(b)); x <= Math.max(ptX(a), ptX(b)); x++) {
+          const p = pt(x, y);
+          if (seen.has(p)) throw invalid(`${ptName(p)} is listed twice`);
+          seen.add(p);
+          setup.push([p, c]);
+        }
+      }
     };
     for (const v of rootProps.AB || []) addSetup(v, BLACK);
     for (const v of rootProps.AW || []) addSetup(v, WHITE);
+    // No KM means no komi, as the SGF standard says. GoYomi's own files always
+    // write KM, so they load with the komi they were saved with.
     const km = parseFloat(((rootProps.KM || [])[0] || '').replace(',', '.'));
-    const komi = Number.isFinite(km) ? km : 7;
+    const komi = Number.isFinite(km) ? km : 0;
     let handicap = 0;
     if (rootProps.HA) {
       const ha = Number(rootProps.HA[0].trim());
@@ -337,17 +374,23 @@ export class Game {
         }
         const mv = toPt((props.B || props.W)[0]);
         const child = game.play(mv);
-        if (!child) throw new Error(`Illegal move in SGF: ${ptName(mv)}`);
+        if (!child) {
+          const why = { occupied: 'there is already a stone there', ko: 'it retakes a ko at once', suicide: 'it is suicide',
+            superko: 'it repeats an earlier position' }[game.check(mv, node).reason];
+          throw new Error(`move ${node.depth + 1}, ${colorName(col)} ${ptName(mv)}, is against the rules (${why}).`);
+        }
         if (props.C) child.comment = props.C[0];
         node = child;
       });
       return node;
     };
-    const walk = (t, from, first) => {
+    // Depth first in file order, with a stack rather than recursion (deep nesting).
+    const todo = [[tree, game.root, true]];
+    while (todo.length) {
+      const [t, from, first] = todo.pop();
       const end = apply(t.seq, from, first);
-      for (const v of t.vars) walk(v, end, false);
-    };
-    walk(tree, game.root, true);
+      for (let k = t.vars.length - 1; k >= 0; k--) todo.push([t.vars[k], end, false]);
+    }
     game.current = game.root;
     // Follow the first (main) variation everywhere by default.
     const stack = [game.root];
