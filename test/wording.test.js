@@ -55,7 +55,7 @@ test('describe: the G3 example at each level', () => {
   assert.deepEqual(describe(G3_FACTS, ctx('beginner')), [
     'Puts the AI\'s stone at G4 in atari: it has only 1 liberty left.',
     'The AI has to save it.',
-    'After the AI answers, this guards the bottom of the board.',
+    'After the AI answers, this protects the bottom of the board.',
     'The AI wanted to play here too.',
   ]);
   assert.deepEqual(describe(G3_FACTS, ctx('improving')), [
@@ -98,8 +98,9 @@ test('describe: attacks on dead stones are not praised', () => {
 test('describe: shape lines give way to a tactical point', () => {
   const flagged = ctx('strong', { shown: { key: 'inaccuracy', flagged: true } });
   const f = [{ type: 'atari', double: false, stones: [P('A8'), P('A7')], trapped: null }, { type: 'alreadyConnected', via: 'diagonal' }, { type: 'emptyTriangle' }];
-  assert.deepEqual(describe(f, flagged), ['Atari: threatens to capture 2 stones next move.']);
   assert.deepEqual(describe(f, ctx('strong')), ['Atari: threatens to capture 2 stones next move.']);
+  // Under a mistake the atari is what the move aimed at, not what went wrong: no line for it either.
+  assert.deepEqual(describe(f, flagged), []);
 });
 
 test('describe: lost stones are a sacrifice when the move was good', () => {
@@ -128,9 +129,12 @@ test('describe: empty triangles and first-line moves are only criticised when th
   const bent = [{ type: 'emptyTriangle' }, { type: 'shape', shape: 'extend' }];
   assert.deepEqual(describe(bent, flagged('improving')), ['Makes an empty triangle, an inefficient shape.']);
   assert.deepEqual(describe(bent, ctx('improving')), ['Extends solidly from its own stones.']);
-  const edge = [{ type: 'shape', shape: 'block' }, { type: 'firstLine' }];
-  assert.deepEqual(describe(edge, ctx('improving')), ['Plays against the opponent\'s stones.']);
-  assert.equal(describe(edge, flagged('improving')).length, 2);
+  const edge = [{ type: 'shape', shape: 'extend' }, { type: 'firstLine' }];
+  assert.deepEqual(describe(edge, ctx('improving')), ['Extends solidly from its own stones.']);
+  assert.deepEqual(describe(edge, flagged('improving')), ['First-line moves are usually small this early in the game.']);
+  // Blocking or playing in open space says nothing the board doesn't.
+  assert.deepEqual(describe([{ type: 'shape', shape: 'block' }], ctx('improving')), []);
+  assert.deepEqual(describe([{ type: 'shape', shape: 'open' }], ctx('beginner')), []);
 });
 
 test('describe: study mode names both colours', () => {
@@ -264,13 +268,17 @@ test('mistakeLines: only the lines that say what went wrong', () => {
   assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'block' }, { type: 'firstLine' }], flagged('improving')), ['First-line moves are usually small this early in the game.']);
   assert.deepEqual(mistakeLines([{ type: 'shape', shape: 'extend' }], flagged('improving')), [], 'a plain shape line is no reason');
   assert.deepEqual(mistakeLines([{ type: 'losesStones', stones: [P('C3'), P('C4')] }], flagged('improving')), ['Leaves your 2 stones at C3 to be captured.']);
+  // The opponent's answer is the first reason (Key moments shows the first).
+  const ans = { type: 'answer', move: P('E5'), what: { type: 'atari', double: true, stones: [P('D5'), P('F5')], trapped: null } };
+  assert.deepEqual(mistakeLines([{ type: 'cut', groups: 2 }, ans, { type: 'firstLine' }], flagged('improving')),
+    ['The AI can answer at E5 with a double atari.', 'First-line moves are usually small this early in the game.']);
 });
 
-test('describe: an area the move only works towards "builds toward" it; no area line for a flagged move', () => {
+test('describe: an area the move only works towards "builds up" (from inside or out); no area line for a flagged move', () => {
   const f = [{ type: 'purpose', regions: [{ region: 6, kind: 'builds', points: 2 }], value: 11 }];
-  assert.deepEqual(describe(f, ctx('improving')), ['It builds toward the lower-left corner.']);
-  assert.deepEqual(describe(f, ctx('beginner')), ['This builds toward the bottom-left corner.']);
-  assert.deepEqual(describe(f, ctx('strong')), ['It builds toward the lower-left corner (+11).'], 'points only for strong players');
+  assert.deepEqual(describe(f, ctx('improving')), ['It builds up the lower-left corner.']);
+  assert.deepEqual(describe(f, ctx('beginner')), ['This builds up the bottom-left corner.']);
+  assert.deepEqual(describe(f, ctx('strong')), ['It builds up the lower-left corner (+11).'], 'points only for strong players');
   assert.deepEqual(describe(f, ctx('improving', { shown: { key: 'mistake', flagged: true } })), [], 'no praise under a Mistake');
 });
 
@@ -284,13 +292,88 @@ test("describe: a threat that needn't be answered says so in one sentence", () =
 test('verdict: a best move says when no other move was close', () => {
   const best = gap => ({ grade: 'best', bestMove: P('D4'), gap });
   const lv = level => levelGrade({ grade: 'best' }, level);
-  assert.equal(verdict(best(3.2), 'improving', lv('improving')), "Exactly the coach's choice. No other move was close: the next best was about 3 points worse.");
-  assert.equal(verdict(best(3.2), 'beginner', lv('beginner')), "Exactly the coach's choice, and no other move was close.");
+  assert.equal(verdict(best(5.2), 'improving', lv('improving')), "Exactly the coach's choice. No other move was close: the next best was about 5 points worse.");
+  assert.equal(verdict(best(5.2), 'beginner', lv('beginner')), "Exactly the coach's choice, and no other move was close.");
   assert.equal(verdict(best(3.2), 'strong', lv('strong')), "Exactly the coach's choice; the next best is 3.2 points worse.");
   assert.equal(verdict(best(1), 'improving', lv('improving')), "Exactly the coach's choice.", 'close alternatives: nothing to add');
+  // A next best 3 points behind still shows as Good to beginners and improving players
+  // (an inaccuracy does), so "no other move was close" would contradict it.
+  assert.equal(verdict(best(3.2), 'improving', lv('improving')), "Exactly the coach's choice.");
+  assert.equal(verdict(best(3.2), 'beginner', lv('beginner')), "Exactly the coach's choice.");
 });
 
 test('missedLine: the point the opponent took right after', () => {
   assert.equal(missedLine(P('B4'), { mover: BLACK, you: BLACK }), 'You missed B4, and the AI took it right away.');
   assert.equal(missedLine(P('B4'), { mover: BLACK, you: 0 }), 'Black missed B4, and White took it right away.');
+});
+
+// ------------------------------------------------ mistakes say what goes wrong
+
+const flaggedCtx = (level, extra = {}) => ctx(level, { shown: { key: 'mistake', flagged: true }, ...extra });
+const answer = (move, what) => ({ type: 'answer', move: P(move), what });
+
+test('describe: under a mistake, the opponent\'s answer comes first', () => {
+  const f = [answer('E5', { type: 'atari', double: true, stones: [P('D5'), P('F5')], trapped: null })];
+  assert.deepEqual(describe(f, flaggedCtx('improving')), ['The AI can answer at E5 with a double atari.']);
+  assert.deepEqual(describe(f, flaggedCtx('beginner')), ['The AI can answer at E5 with a double atari, threatening two of your groups at once.']);
+  assert.deepEqual(describe(f, ctx('improving')), [], 'a good move needs no refutation');
+  assert.deepEqual(describe([answer('C1', { type: 'capture', stones: [P('A1'), P('B1')], ko: false })], flaggedCtx('strong')),
+    ['The AI can answer at C1 and capture your 2 stones at A1.']);
+  assert.deepEqual(describe([answer('E7', { type: 'cut' })], flaggedCtx('improving')), ['The AI can answer at E7 and cut your stones apart.']);
+  assert.deepEqual(describe([answer('E4', { type: 'rescue', stones: [P('E5')], libs: 3 })], flaggedCtx('improving')), ['The AI can answer at E4 and simply save its stone.']);
+  assert.deepEqual(describe([answer('H4', null)], flaggedCtx('improving')), [], 'an answer that does nothing on the board says nothing');
+});
+
+test('describe: an answer that ataris stones the move loses anyway says both in one line', () => {
+  const f = [answer('D1', { type: 'atari', double: false, stones: [P('D2')], trapped: null }), { type: 'losesStones', stones: [P('D2')] }];
+  assert.deepEqual(describe(f, flaggedCtx('improving')), ['The AI can answer at D1, putting your stone at D2 in atari. It can\'t be saved.']);
+});
+
+test('describe: under a mistake, what the move aimed at is left out, what it did stays', () => {
+  // The commenter's D5: "Cuts… Threatens to put the AI's stone at C5 in atari" read as praise of a Big mistake.
+  const f = [{ type: 'cut', groups: 2 }, { type: 'threat', move: P('B5'), what: { type: 'atari', stones: [P('C5')] } }, { type: 'initiative', sente: true, reply: P('B5') },
+    answer('E5', { type: 'atari', double: true, stones: [P('D5'), P('F5')], trapped: null })];
+  assert.deepEqual(describe(f, flaggedCtx('beginner')), ['The AI can answer at E5 with a double atari, threatening two of your groups at once.']);
+  const took = [{ type: 'capture', stones: [P('F6')], ko: false }, { type: 'shape', shape: 'extend' }];
+  assert.deepEqual(describe(took, flaggedCtx('improving')), ['Captures 1 stone.']);
+});
+
+test('verdict: a better move here, or a bigger one in another area', () => {
+  const g = (move, best) => ({ grade: 'mistake', ptLoss: 4.1, wrLoss: 0.08, move: P(move), bestMove: P(best) });
+  const shown = level => levelGrade({ grade: 'mistake' }, level);
+  assert.equal(verdict(g('D8', 'C4'), 'improving', shown('improving')), 'About <b>4.1 points</b> worse than <b>C4</b>. The bigger move was in another area: the left side.');
+  assert.equal(verdict(g('D8', 'C4'), 'beginner', shown('beginner')), 'The coach would have played <b>C4</b>. The bigger move was in another area: the left side.');
+  assert.equal(verdict(g('H6', 'G4'), 'improving', shown('improving')), 'About <b>4.1 points</b> worse than <b>G4</b>, the better move here.');
+  assert.equal(verdict(g('E5', 'E2'), 'improving', shown('improving')), 'About <b>4.1 points</b> worse than <b>E2</b>.', 'in between: neither');
+  assert.equal(verdict({ ...g('D8', 'C4'), move: undefined }, 'improving', shown('improving')), 'About <b>4.1 points</b> worse than <b>C4</b>.', 'an older grade without the move');
+});
+
+test('ignoreNote: silent in a live fight (the commenter\'s C6 and E2)', () => {
+  const G1 = 'F5 D7 F7 D4 C3 F4 G4 D3 C4 G5 G6 H5 F3 E4 H4 H6 H7 F6 E6 C5 D5';
+  // After White's C6, Black's D5 has two liberties; the coach's D2 is far, but the fight is here.
+  assert.equal(ignoreNote(afterAI(G1 + ' C6').board, P('C6'), read('D2'), 'beginner'), null);
+  // After White's E2, Black's D2 has two liberties (and the coach's E5 captures nearby).
+  assert.equal(ignoreNote(afterAI(G1 + ' C6 D2 E2').board, P('E2'), read('E5'), 'beginner'), null);
+});
+
+test('atariWarnings: stones that can\'t escape don\'t come with "play elsewhere" advice', () => {
+  // Black's B2 is in atari in a ladder after White's C2 (A1 B1 open below).
+  const g = afterAI('B2 C2 J9 B3 J8 A2');
+  const warn = atariWarnings(g.board, p => g.check(p), { whose: c => c === BLACK ? 'Your' : 'AI\'s', who: c => c === BLACK ? 'You' : 'AI' });
+  assert.match(warn.map(w => w.text).join(' '), /can't escape: running at B1 only leads to capture/);
+  for (const w of warn) assert.doesNotMatch(w.text, /elsewhere/);
+});
+
+test('describe: a forcing move says the opponent must answer, and names the follow-up instead of crediting the area', () => {
+  // The commenter's F3: an atari on F4, answered at E4; Black's follow-up is G3. "Guards the corner" credited F3 itself.
+  const facts = [
+    { type: 'atari', double: false, stones: [P('F4')], trapped: null },
+    { type: 'threat', move: P('E4'), what: { type: 'capture', stones: [P('F4')] }, forcing: { reply: P('E4'), then: P('G3') } },
+    { type: 'purpose', regions: [{ region: 8, kind: 'protects', points: 3 }], value: 6 },
+  ];
+  assert.deepEqual(describe(facts, ctx('beginner')), ['Puts the AI\'s stone at F4 in atari: it has only 1 liberty left.', 'A forcing move: the AI has to answer at E4. Then you can play G3.']);
+  assert.deepEqual(describe(facts, ctx('improving')), ['Threatens to capture the AI\'s stone at F4: a forcing move, so the AI has to answer at E4. Then you can play G3.']);
+  assert.deepEqual(describe(facts, ctx('strong')), ['Forcing (sente): threatens to capture the AI\'s stone at F4; E4 answers, then G3.']);
+  const away = facts.map(f => f.type === 'threat' ? { ...f, forcing: { reply: P('E4'), then: P('C7') } } : f);
+  assert.match(describe(away, ctx('improving'))[0], /Then you can play elsewhere\.$/);
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Board, BLACK, WHITE, PASS, POINTS, parsePt, ptName } from '../src/board.js';
 import { Game } from '../src/game.js';
-import { boardFacts, moveFacts, threatFacts, purposeFacts, regionOf, cachedFacts } from '../src/explain.js';
+import { boardFacts, moveFacts, threatFacts, purposeFacts, answerFacts, regionOf, cachedFacts } from '../src/explain.js';
 import { Search, seed } from '../src/mcts.js';
 
 const P = parsePt;
@@ -305,4 +305,39 @@ test('purposeFacts: "otherwise" only when the opponent wanted the same point', (
   const r = move => ({ before: read(BLACK), after: read(WHITE, { score: 0 }), baseline: read(WHITE, { score: -10, moves: [[move]] }) });
   assert.equal(purposeFacts(P('C3'), BLACK, r('D5')).find(f => f.type === 'otherwise'), undefined);
   assert.deepEqual(purposeFacts(P('C3'), BLACK, r('C3')).find(f => f.type === 'otherwise'), { type: 'otherwise', move: P('C3') });
+});
+
+// The commenter's game 1 up to Black's D5 (move 21): White's E5 is then a double atari.
+const SAPPHIC = 'F5 D7 F7 D4 C3 F4 G4 D3 C4 G5 G6 H5 F3 E4 H4 H6 H7 F6 E6 C5';
+const gameFrom = moves => { const g = new Game(); for (const m of moves.split(' ')) g.play(P(m)); return g; };
+// A read after the move whose top answer took `share` of the search.
+const answerRead = (toPlay, name, share = 0.6, pv = []) => ({ ...read(toPlay, { moves: [[name, 0, pv, Math.round(500 * share)], ['J1', 0, [], 50]] }), playouts: 500 });
+
+test('answerFacts: the expected answer and what it does (a double atari after D5)', () => {
+  const g = gameFrom(SAPPHIC + ' D5');
+  const [f] = answerFacts(g.board, P('D5'), { after: answerRead(WHITE, 'E5') });
+  assert.equal(ptName(f.move), 'E5');
+  assert.equal(f.what.type, 'atari');
+  assert.equal(f.what.double, true);
+});
+
+test('answerFacts: nothing when the read is split between answers', () => {
+  const g = gameFrom(SAPPHIC + ' D5');
+  assert.deepEqual(answerFacts(g.board, P('D5'), { after: answerRead(WHITE, 'E5', 0.2) }), []);
+});
+
+test('answerFacts: an atari from a stone that can be captured straight back is not named', () => {
+  // The commenter's game 2 after Black's F9: White's E9 ataris two groups, but E9 itself is in atari.
+  const g = gameFrom('E5 F7 D7 D6 E6 E7 G5 C7 G6 D5 G7 D3 D8 C8 E8 F8 F9');
+  const [f] = answerFacts(g.board, P('F9'), { after: answerRead(WHITE, 'E9') });
+  assert.equal(f.what, null);
+});
+
+test('answerFacts: a capture, or the attacked stone simply running away', () => {
+  // Black's B1 leaves A1-B1 with one liberty: White captures at C1.
+  const cap = gameFrom('A1 A2 J9 B2 B1');
+  assert.equal(answerFacts(cap.board, P('B1'), { after: answerRead(WHITE, 'C1') })[0].what.type, 'capture');
+  // Black's E6 ataris White's E5, which runs to E4 with three liberties.
+  const run = gameFrom('D5 E5 F5 J9 E6');
+  assert.equal(answerFacts(run.board, P('E6'), { after: answerRead(WHITE, 'E4') })[0].what.type, 'rescue');
 });

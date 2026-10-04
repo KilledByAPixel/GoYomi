@@ -2,10 +2,10 @@
 // (coach.js) and move facts (explain.js) into sentences. Levels: 'beginner'
 // (stones and liberties, no numbers), 'improving' (points, threats, purpose)
 // and 'strong' (everything, tersely).
-import { BLACK, WHITE, PASS, D4, ptName, ptX, ptY } from './board.js';
+import { BLACK, WHITE, PASS, D4, N, pt, ptName, ptX, ptY } from './board.js';
 import { GRADES, threats } from './coach.js';
 import { ladderCapture } from './ladder.js';
-import { boardFacts, regionOf } from './explain.js';
+import { boardFacts, regionOf, dist } from './explain.js';
 
 export const COACH_FOR = [
   { key: 'auto', label: 'Match AI strength' },
@@ -41,10 +41,25 @@ export function levelGrade(g, level, facts = []) {
 }
 
 // The sentence after the grade: how the move compares with the coach's choice.
+// How many points behind the best a move can be and still show as Good at each
+// level (SHOWN): beginners and improving players see an inaccuracy as Good.
+const CLOSE = { beginner: 4, improving: 4, strong: 1.5 };
+
+// Where the coach's move was compared with the played one: 'here' (close by,
+// a better way to play the same spot), 'elsewhere' (in another area of the
+// board: the bigger move was somewhere else) or null (in between, or unknown).
+export function whereBetter(move, best) {
+  if (move == null || move === PASS || best === PASS) return null;
+  const d = Math.max(Math.abs(ptX(move) - ptX(best)), Math.abs(ptY(move) - ptY(best)));
+  return d <= 2 ? 'here' : d >= 4 && regionOf(move) !== regionOf(best) ? 'elsewhere' : null;
+}
+
 export function verdict(g, level, shown) {
   if (g.grade === 'best') {
-    // How far ahead of the next best move it was: a true reason it was best, straight from the read.
-    if (!(g.gap >= 1.5)) return 'Exactly the coach\'s choice.';
+    // How far ahead of the next best move it was: a true reason it was best,
+    // straight from the read. Only when the next best would show as worse than
+    // Good at this level: one within CLOSE points would be called Good too.
+    if (!(g.gap >= CLOSE[level])) return 'Exactly the coach\'s choice.';
     if (level === 'beginner') return 'Exactly the coach\'s choice, and no other move was close.';
     if (level === 'strong') return `Exactly the coach's choice; the next best is ${g.gap.toFixed(1)} points worse.`;
     return `Exactly the coach's choice. No other move was close: the next best was about ${Math.round(g.gap)} points worse.`;
@@ -56,13 +71,17 @@ export function verdict(g, level, shown) {
       ? `About as good as the coach's choice, ${best}.`
       : `A fine move. The coach slightly preferred ${best}.`;
   }
-  if (level === 'beginner') return passed ? 'The coach would have <b>passed</b>.' : `The coach would have played ${best}.`;
+  // A better way to play here, or a bigger move somewhere else: they're different lessons.
+  const where = whereBetter(g.move, g.bestMove);
+  const place = where === 'here' ? ', the better move here' : '';
+  const area = where === 'elsewhere' ? ` The bigger move was in another area: the ${regionName(g.bestMove, level)}.` : '';
+  if (level === 'beginner') return passed ? 'The coach would have <b>passed</b>.' : `The coach would have played ${best}${place}.${area}`;
   if (g.ptLoss < 0.5) {
     return level === 'strong' ? `Keeps about the same score as ${best}, but the win chance drops ${Math.round(g.wrLoss * 100)}%.`
       : `About the same score as ${best}, but riskier.`;
   }
-  const pts = `About <b>${g.ptLoss.toFixed(1)} points</b> worse than ${best}`;
-  return level === 'strong' && g.wrLoss >= 0.01 ? `${pts} (win chance −${Math.round(g.wrLoss * 100)}%).` : `${pts}.`;
+  const pts = `About <b>${g.ptLoss.toFixed(1)} points</b> worse than ${best}${place}`;
+  return (level === 'strong' && g.wrLoss >= 0.01 ? `${pts} (win chance −${Math.round(g.wrLoss * 100)}%).` : `${pts}.`) + area;
 }
 
 const colorName = c => c === BLACK ? 'Black' : 'White';
@@ -95,13 +114,24 @@ export const regionName = (p, level) => REGION_NAMES[level === 'beginner' ? 'beg
 // the coach's best reply is somewhere else, the move needn't be answered. Names
 // the area of the biggest move, not the point (Hint gives that). Silent when
 // the reply is near the AI's stone or on a liberty of a chain touching it, when
-// the AI's move left the player's stones in atari, or when the coach would pass.
+// the AI's move left the player's stones in atari, when the coach would pass,
+// or in a live fight: a group of the player's within two lines of the AI's
+// stone has two liberties or fewer. There the best move elsewhere is usually
+// part of the same fight (saving that group, or capturing what attacks it),
+// not a reason to relax. (The AI's own stones can be short of liberties
+// without the player having to worry: a lone stone in a corner has two.)
 export function ignoreNote(board, aiMove, an, level) {
   const top = an && an.moves && an.moves[0];
   if (!top || top.move === PASS || aiMove === PASS) return null;
   const player = board.toPlay, candidates = [top.move, ...(top.twins || [])];
   const near = q => Math.max(Math.abs(ptX(q) - ptX(aiMove)), Math.abs(ptY(q) - ptY(aiMove))) <= 2;
   if (candidates.some(near)) return null;
+  for (let y = Math.max(0, ptY(aiMove) - 2); y <= Math.min(N - 1, ptY(aiMove) + 2); y++) {
+    for (let x = Math.max(0, ptX(aiMove) - 2); x <= Math.min(N - 1, ptX(aiMove) + 2); x++) {
+      const p = pt(x, y);
+      if (board.color[p] === player && board.chainLibs(p).length <= 2) return null;
+    }
+  }
   for (const p of [aiMove, ...D4.map(d => aiMove + d)]) {
     const c = board.color[p];
     if (c !== BLACK && c !== WHITE) continue;
@@ -136,23 +166,62 @@ function regionPhrase(regions, level, w, mover) {
   const B = level === 'beginner', names = regions.map(r => REGION_NAMES[B ? 'beginner' : 'other'][r.region]);
   const the = names.join(' and the '), bare = names.join(' and ');
   const kind = regions[0].kind;
-  if (kind === 'protects') return B ? `guards the ${the}` : `secures ${w.poss(mover)} ${bare}`;
+  if (kind === 'protects') return B ? `protects the ${the}` : `secures ${w.poss(mover)} ${bare}`;
   if (kind === 'reduces') return B ? `takes away some of ${w.poss(3 - mover)} area in the ${the}` : `reduces ${w.poss(3 - mover)} ${bare}`;
-  if (kind === 'builds') return `builds toward the ${the}`;
+  // "Up", not "toward": the move can be in that area already, building from its stones there.
+  if (kind === 'builds') return `builds up the ${the}`;
   return `claims the ${the}`;
 }
 
 const SHAPES = {
   contact: ['Attaches to an enemy stone (contact play).', 'Plays right next to an enemy stone.'],
-  block: ['Plays against the opponent\'s stones.'],
+  // Blocking and playing in open space say nothing the board doesn't: no line.
+  block: [],
   extend: ['Extends solidly from its own stones.'],
   diagonal: ['Diagonal move — flexible shape that is hard to cut.', 'A diagonal move: flexible and hard to cut.'],
   opening: ['Opening move staking out a big area.'],
   lowOpening: ['An opening move this low claims little space.'],
-  open: ['Plays in open space.'],
+  open: [],
 };
 
 const overlaps = (a, b) => !!a && !!b && a.some(p => b.includes(p));
+
+// A forcing move (explain.js threatFacts' `forcing`): the threat, that the
+// opponent has to answer it, where, and what the mover plays next on the
+// expected line: the follow-up the forcing move was for, or play elsewhere.
+// `atariSaid`: a beginner's atari line has already named the threat.
+function forcingLine(f, what, atariSaid, ctx, w) {
+  const opp = 3 - ctx.mover, R = ptName(f.forcing.reply), T = f.forcing.then;
+  const local = T != null && T !== PASS && dist(T, f.forcing.reply) <= 3;
+  const elsewhere = T != null && !local;
+  if (ctx.level === 'strong') return `Forcing (sente): threatens to ${what}; ${R} answers, then ${local ? ptName(T) : 'play elsewhere'}.`;
+  const then = local ? ` Then ${w.subj(ctx.mover)} can play ${ptName(T)}.` : elsewhere ? ` Then ${w.subj(ctx.mover)} can play elsewhere.` : '';
+  const must = `${w.subj(opp)} ${w.verb(opp, 'have', 'has')} to answer at ${R}.`;
+  return atariSaid ? `A forcing move: ${must}${then}` : `Threatens to ${what}: a forcing move, so ${must}${then}`;
+}
+
+// Facts about what a move aims at or how it looks: left out under a mistake.
+const UPSIDES = new Set(['cut', 'threat', 'initiative', 'atari', 'connect', 'shape', 'otherwise']);
+
+// Under a mistake: the opponent's expected answer (explain.js answerFacts) and
+// what it does. `takes`: the stones it attacks are lost anyway. Null when the
+// answer does nothing on the board and is far from the move: then the verdict's
+// "the bigger move was elsewhere" is the point, not the answer.
+function answerLine(f, ctx, w, takes) {
+  const opp = 3 - ctx.mover, B = ctx.level === 'beginner', at = ptName(f.move), t = f.what;
+  const they = `${cap(w.subj(opp))} can answer at ${at}`;
+  if (!t) return null;
+  if (t.type === 'capture') return t.ko ? `${they} and take the ko.` : `${they} and capture ${w.stones(ctx.mover, t.stones)}.`;
+  if (t.type === 'atari' && t.double) return B ? `${they} with a double atari, threatening two of ${w.poss(ctx.mover)} groups at once.` : `${they} with a double atari.`;
+  if (t.type === 'atari') {
+    const n = t.stones.length, they2 = n === 1 ? 'It' : 'They';
+    const fate = takes ? ` ${they2} can't be saved.` : t.trapped === 'ladder' ? ` ${they2} can't escape: it's a ladder.` : t.trapped ? ` ${they2} can't escape.` : '';
+    return `${they}, putting ${w.stones(ctx.mover, t.stones)} in atari.${fate}`;
+  }
+  if (t.type === 'cut') return `${they} and cut ${w.poss(ctx.mover)} stones apart.`;
+  if (t.type === 'rescue') return `${they} and simply save its ${t.stones.length === 1 ? 'stone' : 'stones'}.`;
+  return null;
+}
 
 // The coach's explanation of a graded move: one sentence per fact, worded for
 // ctx.level. ctx.shown is the grade as shown (levelGrade), once known.
@@ -167,8 +236,18 @@ export function describe(facts, ctx) {
   const flagged = !!(ctx.shown && ctx.shown.flagged);
   // A move with a tactical point isn't described by its shape.
   const tactical = !!(capture || atari || threat || find('rescue'));
+  const answer = flagged ? find('answer') : null, lost = find('losesStones');
+  // Stones the answer attacks that the move loses anyway: one line says both.
+  const answerTakes = !!(answer && answer.what && answer.what.stones && overlaps(answer.what.stones, lost && lost.stones));
   const out = [];
+  // Under a mistake, first what goes wrong: the opponent's answer.
+  if (answer) {
+    const line = answerLine(answer, ctx, w, answerTakes);
+    if (line) out.push(line);
+  }
   for (const f of facts) {
+    // Under a mistake, what the move aims at reads as praise: say what it did, not what it hoped for.
+    if (flagged && UPSIDES.has(f.type) && !(f.type === 'atari' && f.double)) continue;
     switch (f.type) {
       case 'pass': out.push('Passes.'); break;
       case 'capture': {
@@ -230,7 +309,7 @@ export function describe(facts, ctx) {
         break;
       }
       case 'losesStones':
-        if (!ctx.shown) break; // sacrifice or loss depends on the grade
+        if (!ctx.shown || answerTakes) break; // sacrifice or loss depends on the grade; the answer line may say it
         if (!flagged) out.push(`Gives up ${w.stones(mover, f.stones)}${B ? ', but it gains more elsewhere' : ' as a sacrifice'}.`);
         else out.push(B ? `${cap(w.subj(opp))} can now capture ${w.stones(mover, f.stones)}.` : `Leaves ${w.stones(mover, f.stones)} to be captured.`);
         break;
@@ -246,7 +325,8 @@ export function describe(facts, ctx) {
       case 'separates': if (ctx.intent) out.push(`Aims to cut ${w.poss(opp)} stones apart.`); break;
       case 'shape': {
         const badShape = find('emptyTriangle') && flagged; // don't call it solid as well
-        if (!threat && !purpose && !find('cut') && !(ctx.intent && find('separates')) && !badShape) out.push(SHAPES[f.shape][B ? SHAPES[f.shape].length - 1 : 0]);
+        const said = SHAPES[f.shape];
+        if (said.length && !threat && !purpose && !find('cut') && !(ctx.intent && find('separates')) && !badShape) out.push(said[B ? said.length - 1 : 0]);
         break;
       }
       case 'firstLine': if (flagged) out.push('First-line moves are usually small this early in the game.'); break;
@@ -254,6 +334,8 @@ export function describe(facts, ctx) {
         const t = f.what;
         const what = t.type === 'capture' ? `capture ${w.stones(opp, t.stones)}`
           : t.type === 'atari' ? `put ${w.stones(opp, t.stones)} in atari` : `cut at ${ptName(f.move)}`;
+        // (Only beginners get the atari line beside the threat: see 'atari'.)
+        if (f.forcing) { out.push(forcingLine(f, what, B && !!(atari && overlaps(t.stones, atari.stones)), ctx, w)); break; }
         // A threat the opponent needn't answer yet (gote) says so in the same sentence.
         const gote = !!init && !init.sente;
         const but = S ? 'it\'s gote' : `${w.subj(opp)} ${w.verb(opp, 'don\'t', 'doesn\'t')} have to answer it yet`;
@@ -264,13 +346,16 @@ export function describe(facts, ctx) {
         break;
       }
       case 'initiative':
-        // Gote is said with the threat; sente for improving players when the area line won't say it.
-        if (f.sente && !(purpose && !flagged) && level === 'improving') {
+        // Gote is said with the threat; sente for improving players when the area line won't say it
+        // (nor the forcing-move line).
+        if (f.sente && !(purpose && !flagged) && !(threat && threat.forcing) && level === 'improving') {
           out.push(`${cap(w.subj(opp))} ${w.verb(opp, 'have', 'has')} to answer, so ${w.subj(mover)} ${w.verb(mover, 'keep', 'keeps')} the initiative (sente).`);
         }
         break;
       case 'purpose': {
         if (flagged) break; // what a move gains reads as praise under a Mistake
+        // A forcing move isn't what gains the area: its follow-up is (the forcing line names it).
+        if (threat && threat.forcing) break;
         const kinds = [...new Set(f.regions.map(r => r.kind))];
         const what = kinds.map(k => regionPhrase(f.regions.filter(r => r.kind === k), level, w, mover)).join(' and ');
         // The value is against passing, which only strong players read as a move's size.
@@ -295,7 +380,8 @@ export function describe(facts, ctx) {
 // Of describe's lines for a flagged move, the ones that say what went wrong:
 // those the move's faults add (lines about shape or tactics can change with
 // them, like "extends solidly" becoming "makes an empty triangle").
-const FAULTS = new Set(['losesStones', 'selfAtari', 'ownEye', 'fewLibs', 'hopelessRescue', 'deadTarget', 'firstLine', 'emptyTriangle']);
+// The opponent's answer is one: it says what the move allows.
+const FAULTS = new Set(['answer', 'losesStones', 'selfAtari', 'ownEye', 'fewLibs', 'hopelessRescue', 'deadTarget', 'firstLine', 'emptyTriangle']);
 export function mistakeLines(facts, ctx) {
   const plain = new Set(describe(facts.filter(f => !FAULTS.has(f.type)), ctx));
   return describe(facts, ctx).filter(t => !plain.has(t));
@@ -337,7 +423,8 @@ export function atariWarnings(board, check, names) {
       else out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari: the AI can run at ${lib}, or capture a neighbour.` });
     } else if (t.color === me) {
       if (ko) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari, and ${subj(me)} can't run at ${lib} right now because of ko.` });
-      else if (ladderCapture(board, t.stones[0])) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari and can't escape: running at ${lib} just leads to capture (a ladder or a dead end). Often it's better to play elsewhere.` });
+      // Not "play elsewhere": right after a move elsewhere, that read as praise for it.
+      else if (ladderCapture(board, t.stones[0])) out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari and can't escape: running at ${lib} only leads to capture (a ladder or a dead end) and loses more stones.` });
       else out.push({ kind: 'warn', text: `${names.whose(t.color)} ${stones} in atari. Run at ${lib}, or capture a neighbour, to save ${n > 1 ? 'them' : 'it'}.` });
     } else if (ko) {
       const them = subj(t.color), does = them === 'you' ? 'don\'t' : 'doesn\'t';

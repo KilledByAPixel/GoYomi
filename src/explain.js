@@ -214,11 +214,48 @@ export function threatFacts(before, after, move, mover, reads) {
     // An answer where the opponent wanted to play anyway says nothing about sente or gote.
     const wanted = reads.baseline && reads.baseline.moves && reads.baseline.moves.find(x => x.move !== PASS);
     const anyway = answered && !!wanted && wanted.move !== move && dist(reply, wanted.move) <= 1;
-    const out = [{ type: 'threat', move: m.move, what }];
+    // A forcing move: the read clearly expects the threat to be answered, right
+    // there. Its follow-up (the mover's next move on the expected line) is what
+    // the sequence was for, not the forcing move itself.
+    const expected = an.moves[0];
+    const forced = answered && expected.visits >= Math.max(1, an.playouts) * CLEAR_ANSWER && (dist(reply, move) <= 2 || dist(reply, m.move) <= 1);
+    const out = [{ type: 'threat', move: m.move, what, ...(forced && { forcing: { reply, then: (expected.pv && expected.pv[0]) ?? null } }) }];
     if (!anyway) out.push({ type: 'initiative', sente: answered, reply });
     return out;
   }
   return [];
+}
+
+// The opponent's expected answer to the move (reads.after's top move) and what
+// it does on the board: captures, ataris (a double atari, or one the mover can't
+// escape), cuts in a way that holds, or simply saves stones the move attacked.
+// Under a mistake this is what goes wrong. Only when the read is clear about it:
+// most of the search went into that answer, so it isn't a coin toss between
+// several replies. `what` is null when the answer does none of these.
+export const CLEAR_ANSWER = 0.4;
+export function answerFacts(after, move, reads) {
+  const an = reads.after;
+  const top = an && an.moves && an.moves[0];
+  if (!top || move === PASS || top.move === PASS || !after.isLegal(top.move)) return [];
+  if (top.visits < Math.max(1, an.playouts) * CLEAR_ANSWER) return [];
+  const b = after.clone();
+  b.play(top.move);
+  const facts = boardFacts(after, b, top.move);
+  const find = t => facts.find(f => f.type === t);
+  // An atari from a stone left in atari itself can be captured straight back:
+  // not a refutation worth naming.
+  let what = find('capture') || (!find('selfAtari') && find('atari')) || null;
+  if (!what) {
+    const sep = find('separates');
+    if (sep) {
+      // A cut that holds once play goes on, as in lookAheadFacts.
+      const c = playOut(b, top.pv || []), o = 3 - after.toPlay; // the mover's stones are the ones cut
+      if (sep.at.every(p => c.color[p] === o) && new Set(sep.at.map(p => c.head[p])).size === sep.at.length && !shareLiberty(c, sep.at)) what = { type: 'cut' };
+    }
+  }
+  const res = find('rescue');
+  if (!what && res && (res.libs >= 3 || (res.libs === 2 && !res.ladder))) what = res;
+  return [{ type: 'answer', move: top.move, what }];
 }
 
 // What the move is for: the area where it gains most against not playing it
@@ -264,6 +301,7 @@ export function moveFacts({ before, after, move, reads = {} }) {
     ...lookAheadFacts(before, after, move, facts, reads),
     ...threatFacts(before, after, move, mover, reads),
     ...purposeFacts(move, mover, reads),
+    ...answerFacts(after, move, reads),
   ];
   // Stones the opponent is expected to rescue weren't dead after all: the
   // deeper read of the position after the move outranks the one before it.

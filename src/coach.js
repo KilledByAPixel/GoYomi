@@ -302,7 +302,7 @@ export function gradeMove(before, after, move, check = null) {
     if (runner) gap = best.score - runner.score * sign(mover);
     if (cmp && gap != null) gap = Math.min(gap, -cmp.pt);
   }
-  return { grade, wrLoss, ptLoss, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover, checked: !!check, surprise, gap };
+  return { grade, wrLoss, ptLoss, move, bestMove: best.move, bestWinrate: best.winrate, winrate: wr, alternatives, mover, checked: !!check, surprise, gap };
 }
 
 // A second read that should happen before a grade is shown, as the move whose
